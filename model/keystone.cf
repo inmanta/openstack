@@ -1,0 +1,76 @@
+"""
+    Copyright 2013 KU Leuven Research and Development - iMinds - Distrinet
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+    Administrative Contact: dnet-project-office@cs.kuleuven.be
+    Technical Contact: bart.vanbrabant@cs.kuleuven.be
+"""
+
+entity Keystone extends OpenStackService:
+    """
+    Keystone is the identity server of openstack
+    """
+end
+
+implement Keystone using keystone
+
+implementation keystone for Keystone:
+    p_keystone = std::Package(host = host, name = "keystone", state = "installed", reload = true)
+    f_keystone = std::File(host = host, path = "/etc/keystone/keystone.conf",
+        mode = "640", owner = "root", group = "keystone",
+        content = template("openstack/keystone.conf.tmpl"), reload = true)
+
+    s_keystone = std::Service(host = host, name = "keystone", state = "running",
+        onboot = true, requires = [p_keystone, f_keystone])
+
+    # install the keystone db sync service
+    f_db_sync = std::ConfigFile(host = host, path = "/etc/init/keystone_db_sync.conf", content = file("openstack/keystone_db_sync_init_upstart"))
+    s_db_sync = std::Service(host = host, name = "keystone_db_sync", state = "running", onboot = false,
+        requires = [p_keystone, f_keystone])
+end
+
+admin_project = openstack::Project(name = "admin", enabled = true, description = "The admin project")
+service_project = openstack::Project(name = "service", enabled = true, description = "The service project")
+
+# TODO: add password
+admin_user = openstack::User(name = "admin", enabled = true, email = "", password = "")
+nova_user = openstack::User(name = "nova", enabled = true, email = "", password = "")
+glance_user = openstack::User(name = "glance", enabled = true, email = "", password = "")
+neutron_user = openstack::User(name = "neutron", enabled = true, email = "", password = "")
+cinder_user = openstack::User(name = "cinder", enabled = true, email = "", password = "")
+
+openstack::Role(role = "admin", user = admin_user, project = admin_project)
+openstack::Role(role = "admin", user = nova_user, project = service_project)
+openstack::Role(role = "admin", user = glance_user, project = service_project)
+openstack::Role(role = "admin", user = neutron_user, project = service_project)
+openstack::Role(role = "admin", user = cinder_user, project = service_project)
+
+nova_service = openstack::Service(name = "nova", type = "compute", description = "OpenStack Compute Service")
+cinder_service = openstack::Service(name = "cinder", type = "volume", description = "OpenStack Volume Service")
+glance_service = openstack::Service(name = "glance", type = "image", description = "OpenStack Image Service")
+keystone_service = openstack::Service(name = "keystone", type = "identity", description = "OpenStack Identity Service")
+ec2_service = openstack::Service(name = "ec2", type = "ec2", description = "OpenStack EC2 compatibility Service")
+network_service = openstack::Service(name = "neutron", type = "network", description = "OpenStack networking Service")
+
+openstack::EndPoint(region = "", service = nova_service, public_url = "", admin_url = "", internal_url = "")
+
+"""
+# Create endpoints
+keystone endpoint-create --region $KEYSTONE_REGION --service-id $COMPUTE_SERVICE --publicurl 'http://'"$KEYSTONE_HOST"':8774/v2/$(tenant_id)s' --adminurl 'http://'"$KEYSTONE_HOST"':8774/v2/$(tenant_id)s' --internalurl 'http://'"$KEYSTONE_HOST"':8774/v2/$(tenant_id)s'
+keystone endpoint-create --region $KEYSTONE_REGION --service-id $VOLUME_SERVICE --publicurl 'http://'"$KEYSTONE_HOST"':8776/v1/$(tenant_id)s' --adminurl 'http://'"$KEYSTONE_HOST"':8776/v1/$(tenant_id)s' --internalurl 'http://'"$KEYSTONE_HOST"':8776/v1/$(tenant_id)s'
+keystone endpoint-create --region $KEYSTONE_REGION --service-id $IMAGE_SERVICE --publicurl 'http://'"$KEYSTONE_HOST"':9292' --adminurl 'http://'"$KEYSTONE_HOST"':9292' --internalurl 'http://'"$KEYSTONE_HOST"':9292'
+keystone endpoint-create --region $KEYSTONE_REGION --service-id $IDENTITY_SERVICE --publicurl 'http://'"$KEYSTONE_HOST"':5000/v2.0' --adminurl 'http://'"$KEYSTONE_HOST"':35357/v2.0' --internalurl 'http://'"$KEYSTONE_HOST"':5000/v2.0'
+keystone endpoint-create --region $KEYSTONE_REGION --service-id $EC2_SERVICE --publicurl 'http://'"$KEYSTONE_HOST"':8773/services/Cloud' --adminurl 'http://'"$KEYSTONE_HOST"':8773/services/Admin' --internalurl 'http://'"$KEYSTONE_HOST"':8773/services/Cloud'
+keystone endpoint-create --region $KEYSTONE_REGION --service-id $NETWORK_SERVICE --publicurl 'http://'"$KEYSTONE_HOST"':9696/' --adminurl 'http://'"$KEYSTONE_HOST"':9696/' --internalurl 'http://'"$KEYSTONE_HOST"':9696/'
+"""

@@ -1,0 +1,89 @@
+"""
+    Copyright 2013 KU Leuven Research and Development - iMinds - Distrinet
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+    Administrative Contact: dnet-project-office@cs.kuleuven.be
+    Technical Contact: bart.vanbrabant@cs.kuleuven.be
+"""
+
+entity Project:
+    """
+        A project / tenant in openstack
+    """
+    string name
+    bool enabled
+    string description 
+end
+index Project(name)
+implement Project using std::none
+
+entity User:
+    """
+        A user in openstack
+    """
+    string name
+    string email
+    bool enabled
+    string password
+end
+index User(name)
+implement User using std::none
+
+entity Role:
+    """
+        A role in openstack. A role defines membership of a user in a project. 
+        This entity is used to connect users to projects. With this, it 
+        implicitly defines the role.
+    """
+    string role
+end
+implement Role using std::none
+
+"""
+    Each project can have multiple roles
+"""
+Role roles [0:] -- [1] Project project
+
+"""
+    Each user can have multiple roles
+"""
+Role roles [0:] -- [1] User user
+
+entity Service:
+    string name
+    string type
+    string description
+end
+implement Service using std::none
+
+entity EndPoint:
+    string region
+    string internal_url
+    string public_url
+    string admin_url
+end
+implement EndPoint using std::none
+
+Service service [1] -- [0:] EndPoint endpoints
+
+entity OpenStackService extends ip::services::Server, ip::services::BaseClient:
+    """
+        A generic openstack service that connects to the message queue and 
+        uses a database to store state in.
+    """
+end
+
+mysql::Database database [1] -- [0:] OpenStackService openstack_service
+rabbitmq::RabbitMQServer mqserver [1] -- [0:] OpenStackService openstack_service
+
