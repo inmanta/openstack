@@ -17,7 +17,7 @@
     Technical Contact: bart.vanbrabant@cs.kuleuven.be
 """
 
-entity Cinder extends OpenStackService:
+entity Cinder extends openstack::Service:
     """
         Configure the cinder service on a server
     """

@@ -24,8 +24,8 @@ entity Controller extends ip::services::Client:
 end
 implement Controller using controller
 
-Controller controller [0:1] -- [1] openstack::keystone::Keystone keystone
-Controller controller [0:1] -- [1] openstack::glance::Glance glance
+Controller controller [0:1] -- [1] keystone::Keystone keystone
+Controller controller [0:1] -- [1] glance::Glance glance
 
 entity Compute extends ip::services::Client:
     """

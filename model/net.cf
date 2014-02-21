@@ -36,7 +36,7 @@ implement Network using std::none
 """
     A network is controlled by a project
 """
-Network networks [0:] -- [1] Project project
+Network networks [0:] -- [1] keystone::Project project
 
 entity Router:
     """
@@ -50,7 +50,7 @@ implement Router using std::none
 """
     A router is controlled by a project
 """
-Router routers [0:] -- [1] Project project
+Router routers [0:] -- [1] keystone::Project project
 
 entity Subnet:
     """
@@ -66,7 +66,7 @@ implement Subnet using std::none
 """
     A subnet is controlled by a project
 """
-Subnet subnets [0:] -- [1] Project project
+Subnet subnets [0:] -- [1] keystone::Project project
 
 """
     A subnet is part of a network

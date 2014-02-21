@@ -1,4 +1,0 @@
-description "Keystone db sync"
-author "Bart Vanbrabant <bart@vanbrabant.eu>"
-
-exec /usr/bin/keystone-manage db_sync
