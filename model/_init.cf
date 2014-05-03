@@ -17,8 +17,6 @@
     Technical Contact: bart.vanbrabant@cs.kuleuven.be
 """
 
-
-
 entity Service extends ip::services::Server, ip::services::BaseClient:
     """
         A generic openstack service that connects to the message queue and 
@@ -29,3 +27,24 @@ end
 mysql::Database database [1] -- [0:] Service openstack_service
 rabbitmq::RabbitMQServer mqserver [1] -- [0:] Service openstack_service
 
+entity Host extends ip::Host:
+    """
+        An openstack host with multiple ip's
+
+        :param ip The administrative ip of the host
+        :param net_ip The ip used by the networking system
+        :param storage_ip The ip used by the storage system
+    """
+    ip::ip net_ip
+    ip::ip storage_ip
+end
+
+entity PublicHost extends Host:
+    """
+        :param public_ip The public ip of the host (used for external services)
+    """
+    ip::ip public_ip
+end
+
+implement Host using std::hostDefaults
+implement PublicHost using std::hostDefaults

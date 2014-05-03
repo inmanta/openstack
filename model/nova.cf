@@ -17,7 +17,7 @@
     Technical Contact: bart.vanbrabant@cs.kuleuven.be
 """
 
-entity Controller extends ip::services::Client:
+entity Controller extends openstack::Service:
     """
     The nova controler
     """
@@ -26,6 +26,7 @@ implement Controller using controller
 
 Controller controller [0:1] -- [1] keystone::Keystone keystone
 Controller controller [0:1] -- [1] glance::Glance glance
+Controller controller [0:1] -- [1] neutron::NetworkController neutron
 
 entity Compute extends ip::services::Client:
     """
@@ -35,37 +36,38 @@ end
 implement Compute using kvmCompute
 
 implementation controller for Controller:
-    p_proxy = std::Package(host = host, name = "nova-ajax-console-proxy", state = "latest")
-    p_api = std::Package(host = host, name = "nova-api", state = "latest")
-    p_cert = std::Package(host = host, name = "nova-cert", state = "latest")
-    p_consoleauth = std::Package(host = host, name = "nova-consoleauth", state = "latest")
-    p_vncproxy = std::Package(host = host, name = "nova-novncproxy", state = "latest")
-    p_scheduler = std::Package(host = host, name = "nova-scheduler", state = "latest")
+    p_proxy = std::Package(host = host, name = "nova-ajax-console-proxy", state = "installed")
+    p_api = std::Package(host = host, name = "nova-api", state = "installed")
+    p_cert = std::Package(host = host, name = "nova-cert", state = "installed")
+    p_consoleauth = std::Package(host = host, name = "nova-consoleauth", state = "installed")
+    p_vncproxy = std::Package(host = host, name = "nova-novncproxy", state = "installed")
+    p_scheduler = std::Package(host = host, name = "nova-scheduler", state = "installed")
 
     # config files
-    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = template("openstack/nova.conf.tmpl"))
+    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = template("openstack/nova.conf.tmpl"),
+        requires = [p_api])
 end
 
 implementation kvmCompute for Compute:
     # packages
-    p_kvm = std::Package(host = host, name = "nova-compute-kvm", state = "latest")
-    p_compute = std::Package(host = host, name = "nova-compute", state = "latest", requires = p_kvm)
-    p_conductor = std::Package(host = host, name = "nova-conductor", state = "latest")
-    p_meta = std::Package(host = host, name = "nova-api-metadata", state = "latest")
+    p_kvm = std::Package(host = host, name = "nova-compute-kvm", state = "installed")
+    p_compute = std::Package(host = host, name = "nova-compute", state = "installed", requires = p_kvm)
+    p_conductor = std::Package(host = host, name = "nova-conductor", state = "installed")
+    p_meta = std::Package(host = host, name = "nova-api-metadata", state = "installed")
+    p_virt = std::Package(host = host, name = "libvirt-bin", state = "installed")
 
     # config files
-    f_nova_compute = std::ConfigFile(host = host, path = "/etc/nova/nova-compute.conf", content = template("openstack/nova-compute.conf.tmpl"))
-    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = template("openstack/nova.conf-compute.tmpl"))
-
-    # /etc/nova/api-paste.ini
+    f_nova_compute = std::ConfigFile(host = host, path = "/etc/nova/nova-compute.conf", content = template("openstack/nova-compute.conf.tmpl"),
+        requires = [p_compute])
+    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = template("openstack/nova.conf-compute.tmpl"),
+        requires = [p_compute])
 
     # services
     std::Service(host = host, name = "nova-compute", state = "running", onboot = true, requires = [p_compute, f_nova_compute, s_conductor])
     std::Service(host = host, name = "nova-api-metadata", state = "running", onboot = true, requires = p_meta)
     s_conductor = std::Service(host = host, name = "nova-conductor", state = "running", onboot = true, requires = p_conductor)
-
+    std::Service(host = host, name = "libvirt-bin", state = "running", onboot = true, requires = p_virt)
 end
 
-mysql::Database database [1] -- [0:] Controller nova_controller
 Controller controller [1] -- [0:] Compute compute
 
