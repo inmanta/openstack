@@ -44,7 +44,7 @@ implementation controller for Controller:
     p_scheduler = std::Package(host = host, name = "nova-scheduler", state = "installed")
 
     # config files
-    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = template("openstack/nova.conf.tmpl"),
+    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = std::template("openstack/nova.conf.tmpl"),
         requires = [p_api])
 end
 
@@ -57,9 +57,9 @@ implementation kvmCompute for Compute:
     p_virt = std::Package(host = host, name = "libvirt-bin", state = "installed")
 
     # config files
-    f_nova_compute = std::ConfigFile(host = host, path = "/etc/nova/nova-compute.conf", content = template("openstack/nova-compute.conf.tmpl"),
+    f_nova_compute = std::ConfigFile(host = host, path = "/etc/nova/nova-compute.conf", content = std::template("openstack/nova-compute.conf.tmpl"),
         requires = [p_compute])
-    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = template("openstack/nova.conf-compute.tmpl"),
+    f_nova = std::ConfigFile(host = host, path = "/etc/nova/nova.conf", content = std::template("openstack/nova.conf-compute.tmpl"),
         requires = [p_compute])
 
     # services
