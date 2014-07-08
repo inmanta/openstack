@@ -1,0 +1,14 @@
+name: openstack
+license: Apache 2.0
+author: Bart Vanbrabant <bart.vanbrabant@cs.kuleuven.be>
+source: git@github.com:bartv/imp-openstack
+version: 0.1
+requires:
+    glance: git@github.com:bartv/imp-glance, ">= 0.1"
+    ip: git@github.com:bartv/imp-ip, ">= 0.1"
+    keystone: git@github.com:bartv/imp-keystone, ">= 0.1"
+    mysql: git@github.com:bartv/imp-mysql, ">= 0.1"
+    neutron: git@github.com:bartv/imp-neutron, ">= 0.1"
+    openstack: git@github.com:bartv/imp-openstack, ">= 0.1"
+    rabbitmq: git@github.com:bartv/imp-rabbitmq, ">= 0.1"
+    std: git@github.com:bartv/imp-std, ">= 0.1"
