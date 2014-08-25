@@ -25,7 +25,7 @@ entity Service extends ip::services::Server, ip::services::BaseClient:
 end
 
 mysql::Database database [1] -- [0:] Service openstack_service
-rabbitmq::RabbitMQServer mqserver [1] -- [0:] Service openstack_service
+rabbitmq::Connection mqserver [1] -- [0:] Service openstack_service
 
 entity Host extends ip::Host:
     """
