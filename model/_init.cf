@@ -48,3 +48,21 @@ end
 
 implement Host using std::hostDefaults
 implement PublicHost using std::hostDefaults
+
+entity OpenstackConfig extends vm::IaaSConfig:
+    """
+        The configuration for accessing an Openstack based IaaS
+    """
+    string connection_url
+    string username
+    string password
+    string tenant
+end
+
+implementation osConfig for OpenstackConfig:
+    iaas.iaas_config_string = std::template("openstack/openstack_config.tmpl")
+end
+
+implement OpenstackConfig using osConfig
+
+
