@@ -502,4 +502,4 @@ class VMHandler(ResourceHandler):
 
             facts["vm::Host[%s,name=%s]" % (resource.id.agent_name, host)] = host_facts
 
-        return facts
+        return facts[resource.id.resource_str()]
