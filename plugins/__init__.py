@@ -502,4 +502,6 @@ class VMHandler(ResourceHandler):
 
             facts["vm::Host[%s,name=%s]" % (resource.id.agent_name, host)] = host_facts
 
-        return facts[resource.id.resource_str()]
+        if resource.id.resource_str() in facts:
+            return facts[resource.id.resource_str()]
+        return {}
