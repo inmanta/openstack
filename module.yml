@@ -1,17 +1,11 @@
-name: openstack
+author: Bart Vanbrabant <bart@impera.io>
 license: Apache 2.0
-author: Bart Vanbrabant <bart.vanbrabant@cs.kuleuven.be>
+name: openstack
+requires: {cinder: 'git@github.com:bartv/imp-cinder, ">= 0.1"', glance: 'git@github.com:bartv/imp-glance,
+    ">= 0.1"', ip: 'git@github.com:bartv/imp-ip, ">= 0.1"', keystone: 'git@github.com:bartv/imp-keystone,
+    ">= 0.1"', mysql: 'git@github.com:bartv/imp-mysql, ">= 0.1"', neutron: 'git@github.com:bartv/imp-neutron,
+    ">= 0.1"', nova: 'git@github.com:bartv/imp-nova, ">= 0.1b1"', rabbitmq: 'git@github.com:bartv/imp-rabbitmq,
+    ">= 0.1"', std: 'git@github.com:bartv/imp-std, ">= 0.1"', vm: 'git@github.com:bartv/imp-vm,
+    ">= 0.1"'}
 source: git@github.com:bartv/imp-openstack
-version: 0.2b1
-requires:
-    glance: git@github.com:bartv/imp-glance, ">= 0.1"
-    ip: git@github.com:bartv/imp-ip, ">= 0.1"
-    keystone: git@github.com:bartv/imp-keystone, ">= 0.1"
-    mysql: git@github.com:bartv/imp-mysql, ">= 0.1"
-    neutron: git@github.com:bartv/imp-neutron, ">= 0.1"
-    nova: git@github.com:bartv/imp-nova, ">= 0.1b1"
-    rabbitmq: git@github.com:bartv/imp-rabbitmq, ">= 0.1"
-    cinder: git@github.com:bartv/imp-cinder, ">= 0.1"
-    std: git@github.com:bartv/imp-std, ">= 0.1"
-    vm: git@github.com:bartv/imp-vm, ">= 0.1"
-
+version: 0.2b2
