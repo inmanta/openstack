@@ -8,4 +8,4 @@ requires: {cinder: 'git@github.com:bartv/imp-cinder, ">= 0.1"', glance: 'git@git
     ">= 0.1"', std: 'git@github.com:bartv/imp-std, ">= 0.1"', vm: 'git@github.com:bartv/imp-vm,
     ">= 0.1"'}
 source: git@github.com:bartv/imp-openstack
-version: 0.2b3
+version: 0.2b4

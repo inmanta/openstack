@@ -16,7 +16,7 @@
     Contact: bart@impera.io
 """
 
-from Imp.agent.handler import provider, ResourceHandler
+from impera.agent.handler import provider, ResourceHandler
 
 import os, re, logging, json, tempfile, urllib, time
 
@@ -369,7 +369,7 @@ class VMHandler(ResourceHandler):
         """
             This handler is available to all virtual machines that have type set to openstack in their iaas_config.
         """
-        return "type" in resource.iaas_config and resource.iaas_config["type"] == "openstack" 
+        return "type" in resource.iaas_config and resource.iaas_config["type"] == "openstack"
 
     def check_resource(self, resource):
         """
@@ -452,7 +452,7 @@ class VMHandler(ResourceHandler):
             Get facts about this resource
         """
         LOGGER.debug("Finding facts for %s" % resource.id.resource_str())
-        
+
         OS_api = OpenstackAPI(resource.iaas_config["url"], resource.iaas_config["tenant"],
                               resource.iaas_config["username"], resource.iaas_config["password"])
 
