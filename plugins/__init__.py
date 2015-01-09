@@ -438,14 +438,14 @@ class VMHandler(ResourceHandler):
             if "key" in changes:
                 os_api.add_keypair(changes["key"][0], changes["key"][1])
 
-            if "vm" in changes:
+            if "state" in changes:
                 # find the flavor ref
-                flavor = 0
+                flavor = None
                 for _id, fl in os_api.get_flavors().items():
                     if fl["name"] == resource.flavor:
                         flavor = _id
 
-                if flavor <= 0:
+                if flavor is None:
                     raise Exception("Flavor %s does not exist for vm %s" % (resource.flavor, resource))
 
                 os_api.boot(resource.name, flavor, resource.image, resource.key_name, resource.user_data)
