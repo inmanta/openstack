@@ -386,9 +386,10 @@ class VMHandler(ResourceHandler):
 
         # how the vm doing
         if resource.name in vm_list:
-            vm_state["vm"] = vm_list[resource.name]["status"]
+            # vm_list[resource.name]["status"]
+            vm_state["vm"] = "active"
         else:
-            vm_state["vm"] = None
+            vm_state["vm"] = "purged"
 
         # check if the key is there
         keys = os_api.get_keypairs()
@@ -413,8 +414,12 @@ class VMHandler(ResourceHandler):
         if not vm_state["key"]:
             changes["key"] = (resource.key_name, resource.key_value)
 
-        if vm_state["vm"] is None:
-            changes["vm"] = resource
+        purged = "active"
+        if resource.purged:
+            purged = "purged"
+            
+        if vm_state["vm"] != purged:
+            changes["state"] = (vm_state["vm"], purged)
 
         return changes
 
@@ -438,7 +443,7 @@ class VMHandler(ResourceHandler):
                 flavor = 0
                 for _id, fl in os_api.get_flavors().items():
                     if fl["name"] == resource.flavor:
-                        flavor = int(_id)
+                        flavor = _id
 
                 if flavor <= 0:
                     raise Exception("Flavor %s does not exist for vm %s" % (resource.flavor, resource))
