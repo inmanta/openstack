@@ -417,7 +417,7 @@ class VMHandler(ResourceHandler):
         purged = "active"
         if resource.purged:
             purged = "purged"
-            
+
         if vm_state["vm"] != purged:
             changes["state"] = (vm_state["vm"], purged)
 
