@@ -2,7 +2,7 @@ author: Bart Vanbrabant <bart@impera.io>
 license: Apache 2.0
 name: openstack
 source: git@github.com:impera_io/openstack
-version: 0.2b5
+version: 0.2
 requires:
     ip: git@github.com:bartv/imp-ip, ">= 0.1"
     mysql: git@github.com:bartv/imp-mysql, ">= 0.1"
