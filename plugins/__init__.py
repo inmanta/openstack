@@ -339,7 +339,7 @@ class OpenstackAPI(object):
         _url = self._services["compute"] + "/servers"
 
         if user_data is not None and len(user_data) > 0:
-            user_data = base64.encodestring(user_data.encode())
+            user_data = base64.encodestring(user_data.encode()).decode()
 
         body = {"server" : {
             "name" : name,
