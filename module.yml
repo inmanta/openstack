@@ -1,11 +1,11 @@
 author: Bart Vanbrabant <bart@impera.io>
 license: Apache 2.0
 name: openstack
-source: git@github.com:impera-io/openstack
-version: 0.2.2
+source: git@git.impera.io:modules/openstack
+version: 0.2.3
 requires:
-    ip: git@github.com:impera-io/ip, ">= 0.1"
-    mysql: git@github.com:impera-io/mysql, ">= 0.1"
-    rabbitmq: git@github.com:impera-io/rabbitmq, ">= 0.1"
-    std: git@github.com:impera-io/std, ">= 0.1"
-    vm: git@github.com:impera-io/vm, ">= 0.1"
+    ip: git@git.impera.io:modules/ip, ">= 0.1"
+    mysql: git@git.impera.io:modules/mysql, ">= 0.1"
+    rabbitmq: git@git.impera.io:modules/rabbitmq, ">= 0.1"
+    std: git@git.impera.io:modules/std, ">= 0.1"
+    vm: git@git.impera.io:modules/vm, ">= 0.1"
