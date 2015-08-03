@@ -105,7 +105,7 @@ class OpenstackAPI(object):
         auth_token = self.get_auth_token()
         # REQ: curl -i http://dnetcloud.cs.kuleuven.be:8774/v2/5489e39dce68494286419f228d003d0c/servers/detail
         # -X GET -H "X-Auth-Project-Id: bartvb" -H "User-Agent: python-novaclient"
-        # -H "Accept: application/json" -H "X-Auth-Token: dc2aca3c37dd4609834e17db55a03d01"
+        # -H "Accept: application/json" -H "X-Auth-Token: dc2aca3c37dd4609834e17d"networks": [{"uuid": "532e2baf-72fb-415d-a931-c6ee2246cd42"}]b55a03d01"
 
         if "compute" not in self._services:
             raise Exception("Compute service not available")
@@ -327,7 +327,7 @@ class OpenstackAPI(object):
 
         return flavors
 
-    def boot(self, name, flavor, image, key_name, user_data):
+    def boot(self, name, flavor, image, key_name, user_data, network_id):
         """
         Boot the virtual machine
         """
@@ -341,14 +341,15 @@ class OpenstackAPI(object):
         if user_data is not None and len(user_data) > 0:
             user_data = base64.encodestring(user_data.encode()).decode()
 
-        body = {"server" : {
-            "name" : name,
-            "flavorRef" : flavor,
-            "key_name" : key_name,
-            "imageRef" : image,
-            "user_data" : user_data,
-            "max_count" : 1,
-            "min_count" : 1,
+        body = {"server": {
+            "name": name,
+            "flavorRef": flavor,
+            "key_name": key_name,
+            "imageRef": image,
+            "user_data": user_data,
+            "max_count": 1,
+            "min_count": 1,
+            "networks": [{"uuid": network_id}] 
         }}
 
         conn, path = self._connect(_url)
@@ -448,7 +449,7 @@ class VMHandler(ResourceHandler):
                 if flavor is None:
                     raise Exception("Flavor %s does not exist for vm %s" % (resource.flavor, resource))
 
-                os_api.boot(resource.name, flavor, resource.image, resource.key_name, resource.user_data)
+                os_api.boot(resource.name, flavor, resource.image, resource.key_name, resource.user_data, resource.network)
 
             return True
 
