@@ -16,15 +16,36 @@
     Contact: bart@impera.io
 """
 
-from impera.agent.handler import provider, ResourceHandler
-
-import os, re, logging, json, tempfile, urllib, time
+import os
+import re
+import logging
+import json
+import tempfile
+import urllib
+import time
 
 from http import client
 from dateutil import parser
 import base64, json
 
+from impera.agent.handler import provider, ResourceHandler
+from impera.plugins.base import plugin
+
+
 LOGGER = logging.getLogger(__name__)
+
+
+@plugin
+def parse_logdestination(remote_logging : "string") -> "list":
+    m = re.match("(?P<proto>[^:]+)://(?P<host>[^:]+):(?P<port>[0-9]+)", remote_logging)
+    if m is not None:
+        if m.group("proto") != "tcp":
+            raise Exception("Only tcp is supported for now")
+
+        return [m.group("host"), m.group("port")]
+
+    return ["localhost", 5959]
+
 
 class OpenstackAPI(object):
     """

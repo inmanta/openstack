@@ -21,6 +21,7 @@ entity Service extends ip::services::Server, ip::services::BaseClient:
         A generic openstack service that connects to the message queue and 
         uses a database to store state in.
     """
+    string remote_logging=""
 end
 
 mysql::Database database [1] -- [0:] Service openstack_service
@@ -56,6 +57,8 @@ entity OpenstackConfig extends vm::IaaSConfig:
     string username
     string password
     string tenant
+    string token=""
+    string admin_url=""
 end
 
 implementation osConfig for OpenstackConfig:
