@@ -1,0 +1,17 @@
+[loggers]
+keys=root
+
+[handlers]
+keys=stream
+
+[formatters]
+keys=
+
+[logger_root]
+level=INFO
+handlers=stream
+
+[handler_stream]
+class=logstash.TCPLogstashHandler
+args=("{{ dest[0] }}", {{ dest[1] }}, "logstash", "{{ tags }}", True, 1)
+
