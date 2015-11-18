@@ -133,12 +133,16 @@ class VMHandler(ResourceHandler):
                 self._client.keypair.create(changes["key"][0], changes["key"][1])
 
             if "state" in changes:
-                # find the flavor ref
-                flavor = self._client.flavors.find(name=resource.flavor)
-                network = self._client.networks.find(human_id=resource.network)
-                
-                self._client.servers.create(resource.name, flavor=flavor.id, image=resource.image, key_name=resource.key_name, 
-                                    userdata=resource.user_data, nics=[{"net-id": network.id}])
+                if changes["state"][0] == "purged" and changes["state"][1] == "active":
+                    flavor = self._client.flavors.find(name=resource.flavor)
+                    network = self._client.networks.find(human_id=resource.network)
+
+                    self._client.servers.create(resource.name, flavor=flavor.id, image=resource.image, key_name=resource.key_name, 
+                                        userdata=resource.user_data, nics=[{"net-id": network.id}])
+
+                elif changes["state"][1] == "purged" and changes["state"][0] == "active":
+                    server = self._client.servers.find(name=resource.name)
+                    server.delete()
 
             return True
 
