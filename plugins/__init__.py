@@ -64,10 +64,10 @@ class VMHandler(ResourceHandler):
             sess = session.Session(auth=auth)
             self._client = nova_client.Client("2", session=sess)
             VMHandler.__connections[key] = self._client
-            
+
     def post(self, resource):
         self._client = None
-    
+
     def available(self, resource):
         """
             This handler is available to all virtual machines that have type set to openstack in their iaas_config.
@@ -130,14 +130,14 @@ class VMHandler(ResourceHandler):
         if len(changes) > 0:
             LOGGER.debug("Making changes to resource %s" % resource.id)
             if "key" in changes:
-                self._client.keypair.create(changes["key"][0], changes["key"][1])
+                self._client.keypairs.create(changes["key"][0], changes["key"][1])
 
             if "state" in changes:
                 if changes["state"][0] == "purged" and changes["state"][1] == "active":
                     flavor = self._client.flavors.find(name=resource.flavor)
                     network = self._client.networks.find(human_id=resource.network)
 
-                    self._client.servers.create(resource.name, flavor=flavor.id, image=resource.image, key_name=resource.key_name, 
+                    self._client.servers.create(resource.name, flavor=flavor.id, image=resource.image, key_name=resource.key_name,
                                         userdata=resource.user_data, nics=[{"net-id": network.id}])
 
                 elif changes["state"][1] == "purged" and changes["state"][0] == "active":
@@ -154,19 +154,19 @@ class VMHandler(ResourceHandler):
 
         try:
             vm = self._client.servers.find(name=resource.name)
-            
+
             ips = []
             for net in vm.networks.values():
                 ips.extend(net)
-                
+
             facts = {}
             if len(ips) > 1:
                 LOGGER.warning("Facts only supports one interface per vm. Only the first interface is reported")
-                
+
             if len(ips) == 1:
                 facts["ip_address"] = ips[0]
-                
+
             return facts
-                
+
         except Exception:
             return {}
