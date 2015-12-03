@@ -1,3 +1,4 @@
 python-dateutil
 python-keystoneclient
 python-novaclient
+python-neutronclient

@@ -28,6 +28,7 @@ from impera.plugins.base import plugin
 from keystoneclient.auth.identity import v2
 from keystoneclient import session
 from novaclient import client as nova_client
+from neutronclient.neutron import client as neutron_client
 
 LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ class VMHandler(ResourceHandler):
         # how the vm doing
         if resource.name in vm_list:
             vm_state["vm"] = "active"
+            vm_state["id"] = vm_list[resource.name].id
         else:
             vm_state["vm"] = "purged"
 
@@ -119,6 +121,9 @@ class VMHandler(ResourceHandler):
         if vm_state["vm"] != purged:
             changes["state"] = (vm_state["vm"], purged)
 
+        if "id" in vm_state:
+            changes["id"] = (vm_state["id"], vm_state["id"])
+
         return changes
 
     def do_changes(self, resource):
@@ -137,12 +142,26 @@ class VMHandler(ResourceHandler):
                     flavor = self._client.flavors.find(name=resource.flavor)
                     network = self._client.networks.find(human_id=resource.network)
 
-                    self._client.servers.create(resource.name, flavor=flavor.id, image=resource.image, key_name=resource.key_name,
-                                        userdata=resource.user_data, nics=[{"net-id": network.id}])
+                    server = self._client.servers.create(resource.name, flavor=flavor.id,
+                                                         image=resource.image, key_name=resource.key_name,
+                                                         userdata=resource.user_data, nics=[{"net-id": network.id}])
 
                 elif changes["state"][1] == "purged" and changes["state"][0] == "active":
                     server = self._client.servers.find(name=resource.name)
                     server.delete()
+
+            if "id" in changes:
+                client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
+                                               username=resource.iaas_config["username"],
+                                               password=resource.iaas_config["password"],
+                                               tenant_name=resource.iaas_config["tenant"])
+
+                ports = client.list_ports(device_id=changes["id"])
+                if "ports" in ports and len(ports["ports"]) > 0:
+                    port = ports["ports"][0]
+                    client.update_port(port=port["id"], body={"port":
+                                                              {"port_security_enabled": False,
+                                                               "security_groups": None}})
 
             return True
 
@@ -154,7 +173,6 @@ class VMHandler(ResourceHandler):
 
         try:
             vm = self._client.servers.find(name=resource.name)
-
             ips = []
             for net in vm.networks.values():
                 ips.extend(net)
@@ -163,8 +181,21 @@ class VMHandler(ResourceHandler):
             if len(ips) > 1:
                 LOGGER.warning("Facts only supports one interface per vm. Only the first interface is reported")
 
-            if len(ips) == 1:
+            if len(ips) > 0:
                 facts["ip_address"] = ips[0]
+
+                # lookup network details of this ip
+                for net, addresses in vm.addresses.items():
+                    for addr in addresses:
+                        if addr["addr"] == facts["ip_address"]:
+                            client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
+                                                  username=resource.iaas_config["username"],
+                                                  password=resource.iaas_config["password"],
+                                                  tenant_name=resource.iaas_config["tenant"])
+
+                            subnets = client.list_subnets(name=net)
+                            if "subnets" in subnets and len(subnets["subnets"]) == 1:
+                                facts["cidr"] = subnets["subnets"][0]["cidr"]
 
             return facts
 
