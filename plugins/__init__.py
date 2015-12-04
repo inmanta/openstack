@@ -102,7 +102,7 @@ class VMHandler(ResourceHandler):
 
         return vm_state
 
-    def list_changes(self, resource):
+    def _list_changes(self, resource):
         """
             List the changes that are required to the vm
         """
@@ -122,15 +122,19 @@ class VMHandler(ResourceHandler):
             changes["state"] = (vm_state["vm"], purged)
 
         if "id" in vm_state:
-            changes["id"] = (vm_state["id"], vm_state["id"])
+            return changes, vm_state["id"]
 
+        return changes, None
+
+    def list_changes(self, resource):
+        changes, _ = self._list_changes(resource)
         return changes
 
     def do_changes(self, resource):
         """
             Enact the changes
         """
-        changes = self.list_changes(resource)
+        changes, vm_id = self._list_changes(resource)
 
         if len(changes) > 0:
             LOGGER.debug("Making changes to resource %s" % resource.id)
@@ -150,20 +154,20 @@ class VMHandler(ResourceHandler):
                     server = self._client.servers.find(name=resource.name)
                     server.delete()
 
-            if "id" in changes:
-                client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
-                                               username=resource.iaas_config["username"],
-                                               password=resource.iaas_config["password"],
-                                               tenant_name=resource.iaas_config["tenant"])
+        if vm_id is not None:
+            client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
+                                           username=resource.iaas_config["username"],
+                                           password=resource.iaas_config["password"],
+                                           tenant_name=resource.iaas_config["tenant"])
 
-                ports = client.list_ports(device_id=changes["id"])
-                if "ports" in ports and len(ports["ports"]) > 0:
-                    port = ports["ports"][0]
-                    client.update_port(port=port["id"], body={"port":
-                                                              {"port_security_enabled": False,
-                                                               "security_groups": None}})
+            ports = client.list_ports(device_id=vm_id)
+            if "ports" in ports and len(ports["ports"]) > 0:
+                port = ports["ports"][0]
+                client.update_port(port=port["id"], body={"port":
+                                                          {"port_security_enabled": False,
+                                                           "security_groups": None}})
 
-            return True
+        return True
 
     def facts(self, resource):
         """
