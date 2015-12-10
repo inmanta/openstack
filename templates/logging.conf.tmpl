@@ -2,7 +2,6 @@
 keys=root
 
 [handlers]
-<<<<<<< HEAD
 keys=stream,file
 
 [formatters]
@@ -16,26 +15,13 @@ class=logging.Formatter
 [logger_root]
 level=INFO
 handlers=stream,file
-=======
-keys=stream
-
-[formatters]
-keys=
-
-[logger_root]
-level=INFO
-handlers=stream
->>>>>>> 65555f788c81e66a61e1899d3ea3dc3f579728f7
 
 [handler_stream]
 class=logstash.TCPLogstashHandler
 args=("{{ dest[0] }}", {{ dest[1] }}, "logstash", "{{ tags }}", True, 1)
 
-<<<<<<< HEAD
 [handler_file]
 class=FileHandler
 formatter=file
 args=('{{logfile}}', 'a+')
 
-=======
->>>>>>> 65555f788c81e66a61e1899d3ea3dc3f579728f7
