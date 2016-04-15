@@ -25,15 +25,12 @@ import urllib
 import time
 
 from impera.agent.handler import provider, ResourceHandler
-from impera.plugins.base import plugin
+from impera.plugins import plugin
 
 from keystoneclient.auth.identity import v2
 from keystoneclient import session
 from novaclient import client as nova_client
 from neutronclient.neutron import client as neutron_client
-
-from impera.agent.handler import provider, ResourceHandler
-from impera.plugins.base import plugin
 
 
 LOGGER = logging.getLogger(__name__)
