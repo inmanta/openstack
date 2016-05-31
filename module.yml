@@ -1,11 +1,10 @@
-author: Bart Vanbrabant <bart@impera.io>
+author: Inmanta <code@inmanta.com>
 license: Apache 2.0
 name: openstack
-source: git@git.impera.io:modules/openstack
-version: 0.2.4
+version: 0.3.dev1464723358
 requires:
-    ip: git@git.impera.io:modules/ip, ">= 0.1"
-    mysql: git@git.impera.io:modules/mysql, ">= 0.1"
-    rabbitmq: git@git.impera.io:modules/rabbitmq, ">= 0.1"
-    std: git@git.impera.io:modules/std, ">= 0.1"
-    vm: git@git.impera.io:modules/vm, ">= 0.1"
+- ip
+- mysql
+- rabbitmq
+- std
+- vm
