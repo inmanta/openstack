@@ -1,4 +1,4 @@
 python-dateutil
-python-keystoneclient
+python-keystoneclient <= 2.3.1
 python-novaclient
 python-neutronclient
