@@ -217,11 +217,14 @@ class VMHandler(ResourceHandler):
 
             ports = client.list_ports(device_id=vm_id)
             if "ports" in ports and len(ports["ports"]) > 0:
-                port = ports["ports"][0]
-                client.update_port(port=port["id"], body={"port":
+                try:
+                    port = ports["ports"][0]
+                    client.update_port(port=port["id"], body={"port":
                                                           {"port_security_enabled": False,
                                                            "security_groups": None}})
-
+                except:
+                    # can happen, less important
+                    pass
         return True
 
     def facts(self, resource):
