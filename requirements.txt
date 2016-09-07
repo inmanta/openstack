@@ -1,3 +1,4 @@
+cliff <= 2.0.0
 python-dateutil
 python-keystoneclient <= 2.3.1
 python-novaclient
