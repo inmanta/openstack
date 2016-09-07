@@ -35,8 +35,9 @@ from neutronclient.neutron import client as neutron_client
 
 LOGGER = logging.getLogger(__name__)
 
+
 @plugin
-def parse_logdestination(remote_logging : "string") -> "list":
+def parse_logdestination(remote_logging: "string") -> "list":
     m = re.match("(?P<proto>[^:]+)://(?P<host>[^:]+):(?P<port>[0-9]+)", remote_logging)
     if m is not None:
         if m.group("proto") != "tcp":
@@ -47,12 +48,13 @@ def parse_logdestination(remote_logging : "string") -> "list":
     return ["localhost", 5959]
 
 
-@provider("vm::Host", name = "openstack")
+@provider("vm::Host", name="openstack")
 class VMHandler(ResourceHandler):
     """
         This class handles managing openstack resources
     """
     __connections = {}
+
     def pre(self, resource):
         """
             Setup a connection with neutron
@@ -132,6 +134,55 @@ class VMHandler(ResourceHandler):
         changes, _ = self._list_changes(resource)
         return changes
 
+    def get_extra_port_config(self, resource):
+        # best effort, neutron handler will fix if required
+
+        xc = json.loads(resource.extraconfig)
+        xc = [v for k, v in xc.items() if k.index("neutron.port.") == 0]
+
+        if len(xc) == 0:
+            return []
+
+        client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
+                                       username=resource.iaas_config["username"],
+                                       password=resource.iaas_config["password"],
+                                       tenant_name=resource.iaas_config["tenant"])
+
+        out = []
+
+        for prt in xc:
+            ports = client.list_ports(name=prt["name"])['ports']
+            if len(ports) != 0:
+                continue
+
+            nw = client.list_networks(name=prt["network"])['networks']
+            if len(nw) != 1:
+                continue
+            network_id = nw[0]["id"]
+
+            nw = client.list_subnets(name=prt["subnet"])['subnets']
+            if len(nw) != 1:
+                continue
+            subnet_id = nw[0]["id"]
+
+            body_value = {'port': {
+                'admin_state_up': True,
+                'name': prt["name"],
+                'network_id': network_id
+            }
+            }
+
+            body_value["port"]["fixed_ips"] = [{"subnet_id": subnet_id, "ip_address": prt["address"]}]
+
+            result = client.create_port(body=body_value)
+
+            if "port" not in result:
+                continue
+
+            port_id = result["port"]["id"]
+            out.append({"port-id": port_id})
+        return out
+
     def do_changes(self, resource):
         """
             Enact the changes
@@ -148,9 +199,11 @@ class VMHandler(ResourceHandler):
                     flavor = self._client.flavors.find(name=resource.flavor)
                     network = self._client.networks.find(human_id=resource.network)
 
+                    nics = [{"net-id": network.id}] + self.get_extra_port_config(resource)
+
                     server = self._client.servers.create(resource.name, flavor=flavor.id,
                                                          image=resource.image, key_name=resource.key_name,
-                                                         userdata=resource.user_data, nics=[{"net-id": network.id}])
+                                                         userdata=resource.user_data, nics=nics)
 
                 elif changes["state"][1] == "purged" and changes["state"][0] == "active":
                     server = self._client.servers.find(name=resource.name)
@@ -164,11 +217,14 @@ class VMHandler(ResourceHandler):
 
             ports = client.list_ports(device_id=vm_id)
             if "ports" in ports and len(ports["ports"]) > 0:
-                port = ports["ports"][0]
-                client.update_port(port=port["id"], body={"port":
+                try:
+                    port = ports["ports"][0]
+                    client.update_port(port=port["id"], body={"port":
                                                           {"port_security_enabled": False,
                                                            "security_groups": None}})
-
+                except:
+                    # can happen, less important
+                    pass
         return True
 
     def facts(self, resource):
@@ -195,9 +251,9 @@ class VMHandler(ResourceHandler):
                     for addr in addresses:
                         if addr["addr"] == facts["ip_address"]:
                             client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
-                                                  username=resource.iaas_config["username"],
-                                                  password=resource.iaas_config["password"],
-                                                  tenant_name=resource.iaas_config["tenant"])
+                                                           username=resource.iaas_config["username"],
+                                                           password=resource.iaas_config["password"],
+                                                           tenant_name=resource.iaas_config["tenant"])
 
                             subnets = client.list_subnets(name=net)
                             if "subnets" in subnets and len(subnets["subnets"]) == 1:

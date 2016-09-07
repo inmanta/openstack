@@ -1,7 +1,7 @@
 author: Inmanta <code@inmanta.com>
 license: Apache 2.0
 name: openstack
-version: 0.4.1
+version: '0.6.1'
 requires:
 - ip
 - mysql
