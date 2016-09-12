@@ -24,7 +24,7 @@ import tempfile
 import urllib
 import time
 
-from inmanta.agent.handler import provider, ResourceHandler
+from inmanta.agent.handler import provider, ResourceHandler, cache
 from inmanta.plugins import plugin
 
 from keystoneclient.auth.identity import v2
@@ -62,16 +62,18 @@ class VMHandler(ResourceHandler):
         key = (resource.iaas_config["url"], resource.iaas_config["tenant"], resource.iaas_config["username"],
                resource.iaas_config["password"])
         if key in VMHandler.__connections:
-            self._client = VMHandler.__connections[key]
+            self._client, self._neutron = VMHandler.__connections[key]
         else:
             auth = v2.Password(auth_url=resource.iaas_config["url"], username=resource.iaas_config["username"],
                                password=resource.iaas_config["password"], tenant_name=resource.iaas_config["tenant"])
             sess = session.Session(auth=auth)
             self._client = nova_client.Client("2", session=sess)
-            VMHandler.__connections[key] = self._client
+            self._neutron = neutron_client.Client("2.0", session=sess)
+            VMHandler.__connections[key] = (self._client, self._neutron)
 
     def post(self, resource):
         self._client = None
+        self._neutron = None
 
     def available(self, resource):
         """
@@ -143,43 +145,50 @@ class VMHandler(ResourceHandler):
         if len(xc) == 0:
             return []
 
-        client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
-                                       username=resource.iaas_config["username"],
-                                       password=resource.iaas_config["password"],
-                                       tenant_name=resource.iaas_config["tenant"])
+        client = self._neutron
 
         out = []
 
         for prt in xc:
             ports = client.list_ports(name=prt["name"])['ports']
-            if len(ports) != 0:
+            if len(ports) > 1:
                 continue
 
-            nw = client.list_networks(name=prt["network"])['networks']
+            nw = self.cache.get_or_else(
+                key="nova_networks", function=client.list_networks, timeout=60, name=prt["network"])['networks']
             if len(nw) != 1:
                 continue
             network_id = nw[0]["id"]
 
-            nw = client.list_subnets(name=prt["subnet"])['subnets']
+            nw = self.cache.get_or_else(
+                key="nova_subnets", function=client.list_subnets,  timeout=60, name=prt["subnet"])['subnets']
             if len(nw) != 1:
                 continue
             subnet_id = nw[0]["id"]
 
-            body_value = {'port': {
-                'admin_state_up': True,
-                'name': prt["name"],
-                'network_id': network_id
-            }
-            }
+            if len(ports) == 1:
+                port = ports[0]
+                if port["network_id"] != network_id:
+                    continue
+                if 'fixed_ips' not in port or len(port['fixed_ips']) != 1 or port['fixed_ips'][0]['subnet_id'] != subnet_id or port['fixed_ips'][0]['ip_address'] != prt["address"]:
+                    continue
+                port_id = port['id']
+            else:
+                body_value = {'port': {
+                    'admin_state_up': True,
+                    'name': prt["name"],
+                    'network_id': network_id
+                }
+                }
 
-            body_value["port"]["fixed_ips"] = [{"subnet_id": subnet_id, "ip_address": prt["address"]}]
+                body_value["port"]["fixed_ips"] = [{"subnet_id": subnet_id, "ip_address": prt["address"]}]
 
-            result = client.create_port(body=body_value)
+                result = client.create_port(body=body_value)
 
-            if "port" not in result:
-                continue
+                if "port" not in result:
+                    continue
 
-            port_id = result["port"]["id"]
+                port_id = result["port"]["id"]
             out.append({"port-id": port_id})
         return out
 
@@ -204,16 +213,14 @@ class VMHandler(ResourceHandler):
                     server = self._client.servers.create(resource.name, flavor=flavor.id,
                                                          image=resource.image, key_name=resource.key_name,
                                                          userdata=resource.user_data, nics=nics)
+                    vm_id = server.id
 
                 elif changes["state"][1] == "purged" and changes["state"][0] == "active":
                     server = self._client.servers.find(name=resource.name)
                     server.delete()
 
         if vm_id is not None:
-            client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
-                                           username=resource.iaas_config["username"],
-                                           password=resource.iaas_config["password"],
-                                           tenant_name=resource.iaas_config["tenant"])
+            client = self._neutron
 
             ports = client.list_ports(device_id=vm_id)
             if "ports" in ports and len(ports["ports"]) > 0:
@@ -227,6 +234,7 @@ class VMHandler(ResourceHandler):
                     pass
         return True
 
+    @cache(timeout=1)
     def facts(self, resource):
         """
             Get facts about this resource
@@ -234,10 +242,17 @@ class VMHandler(ResourceHandler):
         LOGGER.debug("Finding facts for %s" % resource.id.resource_str())
 
         try:
-            vm = self._client.servers.find(name=resource.name)
-            ips = []
-            for net in vm.networks.values():
-                ips.extend(net)
+            vm = self.cache.get_or_else(
+                key="nova_servers", function=self._client.servers.find, timeout=60, name=resource.name)
+
+            networks = vm.networks
+
+            if resource.network in networks:
+                ips = networks[resource.network]
+            else:
+                ips = []
+                for net in networks.values():
+                    ips.extend(net)
 
             facts = {}
             if len(ips) > 1:
@@ -250,12 +265,10 @@ class VMHandler(ResourceHandler):
                 for net, addresses in vm.addresses.items():
                     for addr in addresses:
                         if addr["addr"] == facts["ip_address"]:
-                            client = neutron_client.Client("2.0", auth_url=resource.iaas_config["url"],
-                                                           username=resource.iaas_config["username"],
-                                                           password=resource.iaas_config["password"],
-                                                           tenant_name=resource.iaas_config["tenant"])
+                            client = self._neutron
 
-                            subnets = client.list_subnets(name=net)
+                            subnets = self.cache.get_or_else(
+                                key="nova_subnets", function=client.list_subnets, timeout=60, name=net)
                             if "subnets" in subnets and len(subnets["subnets"]) == 1:
                                 facts["cidr"] = subnets["subnets"][0]["cidr"]
 
