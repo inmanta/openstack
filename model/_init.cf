@@ -18,11 +18,13 @@
 import ip
 import ip::services
 import vm
+import ssh
 
-entity OpenstackConfig extends vm::IaaSConfig:
+entity Provider:
     """
         The configuration for accessing an Openstack based IaaS
     """
+    string name
     string connection_url
     string username
     string password
@@ -31,8 +33,327 @@ entity OpenstackConfig extends vm::IaaSConfig:
     string admin_url=""
 end
 
-implementation osConfig for OpenstackConfig:
-    iaas.iaas_config_string = std::template("openstack/openstack_config.tmpl")
+index Provider(name)
+
+#implementation osConfig for OpenstackConfig:
+#    iaas.iaas_config_string = std::template("openstack/openstack_config.tmpl")
+#end
+
+implement Provider using std::none
+
+## Keystone config
+entity Project:
+    """
+        A project / tenant in openstack
+    """
+    string name
+    bool enabled
+    string description
+    bool manage=true
+    bool purged=false
+    bool purge_on_delete=true
+end
+index Project(provider, name)
+Project project [0:] -- [1] Provider provider
+implement Project using std::none
+
+entity User:
+    """
+        A user in openstack. A handler for this entity type is loaded by agents.
+
+        :param name             The name of the user. The name of the user has to be unique on a specific IaaS. The handler will
+                                use this name to query for the exact user and its ID.
+        :param email            The email address of the user to use.
+        :param enabled          Enable or disable this user
+        :param password         The password for this user. The handler will always reset back to this password. The handler
+                                will ignore this attribute when an empty string is set.
+        :param purged           Set this attribute to true if the user has to be purged.
+        :param purge_on_delete  Purge the resource when it is deleted from the configuration model.
+    """
+    string name
+    string email
+    bool enabled=true
+    string password=""
+    bool purged=false
+    bool purge_on_delete=true
+end
+index User(provider, name)
+User user [0:] -- [1] Provider provider
+implement User using std::none
+
+entity Role:
+    """
+        A role in openstack. A role defines membership of a user in a project.
+        This entity is used to connect users to projects. With this, it
+        implicitly defines the role.
+
+        :param id A unique id (generated in the implementation with a template)
+    """
+    string role_id
+    string role
+    bool purged=false
+end
+Role role [0:] -- [1] Provider provider
+implement Role using roleImpl
+
+"""
+    Each project can have multiple roles
+"""
+Role roles [0:] -- [1] Project project
+
+"""
+    Each user can have multiple roles
+"""
+Role roles [0:] -- [1] User user
+
+implementation roleImpl for Role:
+    self.requires = self.project
+    self.requires = self.user
+
+    self.provider = self.user.provider
+
+    self.role_id = "{{ project.name }}_{{ user.name }}_{{ role }}"
 end
 
-implement OpenstackConfig using osConfig
+entity Service:
+    string name
+    string type
+    string description
+    bool purged = false
+end
+implement Service using std::none
+Service service [0:] -- [1] Provider provider
+index Service(provider, name, type)
+
+entity EndPoint:
+    string region
+    string internal_url
+    string public_url
+    string admin_url
+    string service_id
+    bool purged = false
+end
+implement EndPoint using endPoint
+Service service [1] -- [0:1] EndPoint endpoint
+EndPoint endpoint [0:] -- [1] Provider provider
+
+implementation endPoint for EndPoint:
+    self.provider = self.service.provider
+
+    self.service_id = "{{ service.type }}_{{ service.name }}"
+end
+
+## Neutron config
+typedef admin_state as string matching self == "up" or self == "down"
+
+entity NeutronEntity:
+    """
+        An entity managed by neutron.
+    """
+    bool purged=false
+end
+
+NeutronEntity nes [0:] -- [1] Provider provider
+
+entity Network extends NeutronEntity, vm::Network:
+    """
+        A neutron network owned by a project
+    """
+    bool external=false
+    string physical_network=""
+    string network_type=""
+    number segmentation_id=0
+end
+
+entity Port extends NeutronEntity:
+    """
+        A port on a network
+    """
+    ip::ip address=""
+end
+
+Project project [1] -- [0:] Port ports
+
+entity RouterPort extends Port:
+    """
+        A port attached to a router
+    """
+    string name
+end
+
+index RouterPort(router, subnet)
+
+implement RouterPort using std::none
+
+Subnet subnet [0:1] -- [0:] RouterPort routers
+
+entity HostPort extends Port:
+    """
+        A port attached to a VM
+    """
+    string name
+    bool portsecurity = true
+    bool purge_on_delete = true
+end
+
+Subnet subnet [1] -- [0:] HostPort hostports
+vm::Host host [1] -- [0:] HostPort extraports
+
+implementation reqsHP for HostPort:
+    self.requires = [host, subnet]
+    self.host.extraconfig = vm::ExtraConfig(name="neutron.port.{{name}}",content = std::template("neutron/port_extraconfig.tmpl"))
+end
+
+implement HostPort using reqsHP
+
+index HostPort(provider, name)
+
+index Network(provider, name)
+
+implement Network using std::none
+
+Project project [1] -- [0:] Network networks
+
+entity Subnet extends NeutronEntity:
+    """
+        A neutron network subnet
+    """
+    ip::cidr network_address
+    bool dhcp
+    string name
+    string allocation_start=""
+    string allocation_end=""
+    ip::ip[] dns_servers=[]
+end
+
+implement Subnet using std::none
+
+index Subnet(name)
+
+Project project [1] -- [0:] Subnet subnets
+Network network [1] -- [0:] Subnet subnets
+
+entity Route:
+    """
+        A routing rule to add
+    """
+    ip::cidr destination
+    ip::ip nexthop
+end
+implement Route using std::none
+
+entity Router extends NeutronEntity:
+    """
+        A router
+    """
+    admin_state admin_state
+    string name
+    bool ha=false
+    bool distributed=false
+end
+
+index Router(name)
+
+implement Router using std::none
+
+Router router [0:1] -- [0:] RouterPort ports
+Router router [0:1] -- [0:] Subnet subnets
+Router routers [0:] -- [0:1] Network ext_gateway
+Router router [0:1] -- [0:] Route routes
+Project project [1] -- [0:] Router routers
+
+## Nova config
+typedef direction as string matching self == "ingress" or self == "egress"
+
+entity SecurityGroup:
+    string description=""
+    string name
+    bool manage_all=true
+    bool purged=false
+    bool purge_on_delete=false
+end
+
+implement SecurityGroup using std::none
+
+SecurityGroup security_groups [0:] -- [1] Provider provider
+SecurityGroup security_groups [0:] -- [1] Project project
+
+entity SecurityRule:
+    """
+        A filter rule in the a security group
+
+        :param ip_protocol The type of ip protocol to allow. Currently this support tcp/udp/icmp/sctp or all
+    """
+    ip::protocol ip_protocol
+    ip::port port_min=0
+    ip::port port_max=0
+    ip::port port=0
+    direction direction
+end
+
+entity IPrule extends SecurityRule:
+    ip::cidr remote_prefix
+end
+
+entity GroupRule extends SecurityRule:
+end
+
+GroupRule remote_group_rules [0:] -- [1] SecurityGroup remote_group
+
+implement IPrule using std::none
+implement GroupRule using std::none
+
+SecurityRule rules [0:] -- [1] SecurityGroup group
+
+entity FloatingIP:
+    bool purged=false
+    bool purge_on_delete=false
+    string name
+end
+
+implementation fipName for FloatingIP:
+    # We need a consistent and unique name to identity the fip
+    self.name = "{{router.name}}_{{host.name}}"
+end
+index FloatingIP(router, host)
+
+implement FloatingIP using fipName
+
+FloatingIP floating_ips [0:] -- [1] Project project
+FloatingIP floating_ips [0:] -- [1] Provider provider
+FloatingIP floating_ips [0:] -- [1] Router router
+FloatingIP floating_ips [0:] -- [1] Host host
+
+SecurityGroup security_groups [0:] -- [1] Host host
+
+entity Host extends ip::Host:
+    string flavor
+    string image
+    string user_data=""
+    bool   purged = false
+    bool   purge_on_delete = true
+end
+
+implement Host using std::hostDefaults, ipFact
+
+entity ExtraConfig:
+    """
+        an object for handlers to add config to the resource
+    """
+    string name
+    string content
+end
+
+implement ExtraConfig using std::none
+
+Host host [1] -- [0:] ExtraConfig extraconfig
+
+implementation ipFact for Host:
+    self.ip = std::getfact(self, "ip_address")
+end
+
+Subnet subnet [1] -- [0:] Host hosts
+ssh::Key key_pair [1] -- [0:] Host openstack_hosts
+Project project [1] -- [0:] Host hosts
+Provider provider [1] -- [0:] Host openstack_hosts
+
