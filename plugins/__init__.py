@@ -270,8 +270,10 @@ class FloatingIP(Resource):
     """
         A floating ip
     """
-    fields = OS_FIELDS + ["name"]
-    map = {}
+    fields = OS_FIELDS + ["name", "port", "external_network"]
+    map = {"port": lambda _, x: x.port.name,
+           "external_network": lambda _, x: x.router.ext_gateway.name,
+           }
     map.update(OS_MAP.copy())
 
 
@@ -1484,17 +1486,77 @@ class SecurityGroupHandler(NeutronHandler):
 
 @provider("openstack::FloatingIP", name="openstack")
 class FloatingIPHandler(NeutronHandler):
+    @cache(timeout=10)
+    def get_port_id(self, name):
+        ports = self._client.list_ports(name=name)["ports"]
+        if len(ports) == 0:
+            return None
+
+        elif len(ports) == 1:
+            return ports[0]["id"]
+        else:
+            raise Exception("Multiple ports found with name %s" % name)
+
+    @cache(timeout=10)
+    def get_floating_ip(self, port_id):
+        fip = self._client.list_floatingips(port_id=port_id)["floatingips"]
+        if len(fip) == 0:
+            return None
+
+        else:
+            return fip["id"]
+
     def check_resource(self, resource: FloatingIP) -> FloatingIP:
         """ Check the state of the resource
         """
         current = resource.clone()
+        port_id = self.get_port_id(resource.port)
+        fip = self.get_floating_ip(port_id)
+        if fip is None:
+            current.purged = True
+
+        else:
+            current.purged = False
+
         return current
+
+    def _find_available_fips(self, project_id, network_id):
+        available_fips = []
+        floating_ips = self._client.list_floatingips(floating_network_id=network_id, tenant_id=project_id)["floatingips"]
+        for fip in floating_ips:
+            if fip["port_id"] is None:
+                available_fips.append(fip)
+
+        return available_fips
 
     def do_changes(self, resource: FloatingIP) -> FloatingIP:
         """ Enforce the changes
         """
         changes = self.list_changes(resource)
         changed = False
+
+        project_id = self.get_project_id(resource, resource.project)
+        network_id = self.get_network_id(None, resource.external_network)
+        port_id = self.get_port_id(resource.port)
+
+        if "purged" in changes:
+            if changes["purged"][0]:  # create
+                available_fips = self._find_available_fips(project_id, network_id)
+                if len(available_fips) > 0:
+                    fip_id = available_fips[0]["id"]
+                    self._client.update_floatingip(fip_id, {"floatingip": {"port_id": port_id, "description": resource.name}})
+
+                else:
+                    self._client.create_floatingip({"floatingip": {"port_id": port_id, "floating_network_id": network_id,
+                                                                   "description": resource.name}})
+
+                changed = True
+
+            else:
+                # disassociate and purge
+                fip_id = self.get_floating_ip(port_id)
+                if fip_id is not None:
+                    self._client.delete_floatingip(fip_id)
 
         return changed
 

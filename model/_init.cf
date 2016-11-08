@@ -311,18 +311,17 @@ end
 
 implementation fipName for FloatingIP:
     # We need a consistent and unique name to identity the fip
-    self.name = "{{router.name}}_{{host.name}}"
+    self.name = "{{router.name}}_{{port.name}}"
 #    neutron::validate_floatingip_attachment()
 end
-index FloatingIP(router, host)
+index FloatingIP(router, port)
 
 implement FloatingIP using fipName
 
 FloatingIP floating_ips [0:] -- [1] Project project
 FloatingIP floating_ips [0:] -- [1] Provider provider
 FloatingIP floating_ips [0:] -- [1] Router router
-FloatingIP floating_ips [0:] -- [0:1] Host host
-FloatingIP floating_ips [0:] -- [0:1] HostPort port
+FloatingIP floating_ips [0:] -- [1] HostPort port
 
 entity Host extends ip::Host:
     string flavor
@@ -331,6 +330,8 @@ entity Host extends ip::Host:
     bool   purged = false
     bool   purge_on_delete = true
 end
+
+Host eth0_host [1] -- [1] HostPort eth0_port
 
 implement Host using std::hostDefaults, ipFact
 
@@ -341,6 +342,7 @@ end
 implementation eth0Port for Host:
     port = HostPort(provider=provider, host=self, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self, "ip_address"),
                     purged=false, project=project, port_index=1)
+    self.eth0_port = port
 end
 
 implement Host using eth0Port when subnet is defined
