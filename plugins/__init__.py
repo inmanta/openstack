@@ -75,7 +75,7 @@ def get_user_data(exporter, vm):
         ua = vm.user_data
     except UnknownException:
         ua = ""
-    #if ua is None or ua == "":
+    # if ua is None or ua == "":
     #    raise Exception("User data is required!")
     return ua
 
@@ -89,17 +89,31 @@ OS_MAP = {"project": lambda x, y: y.project.name,
           }
 
 
-@resource("openstack::Host", agent = "provider.name", id_attribute = "name")
+def get_ports(_, vm):
+    ports = []
+    for p in vm.ports:
+        port = {"name": p.name, "address": None, "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
+        try:
+            port["address"] = p.address
+        except UnknownException:
+            pass
+        ports.append(port)
+
+    return ports
+
+
+@resource("openstack::Host", agent="provider.name", id_attribute="name")
 class Host(Resource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
-    fields = OS_FIELDS + ["name", "flavor", "image", "key_name", "user_data", "key_value", "network", "extraconfig"]
+    fields = OS_FIELDS + ["name", "flavor", "image", "key_name", "user_data", "key_value", "ports",
+                          "security_groups"]
     map = {"key_name": get_key_name,
            "key_value": get_key_value,
-           "user_data" : get_user_data,
-           "network": lambda _, vm: vm.subnet.name,
-           "extraconfig": lambda _,xs: "{" + ",".join(["\"%s\" : %s" % (x.name,x.content) for x in xs.extraconfig ]) + "}"
+           "user_data": get_user_data,
+           "ports": get_ports,
+           "security_groups": lambda _, vm: [x.name for x in vm.security_groups],
            }
     map.update(OS_MAP)
 
@@ -181,14 +195,22 @@ class RouterPort(Resource):
            "auth_url": lambda x, y: y.provider.connection_url}
 
 
+def get_port_address(exporter, port):
+    try:
+        return port.address
+    except UnknownException:
+        return ""
+
+
 @resource("openstack::HostPort", agent="provider.name", id_attribute="name")
 class HostPort(Resource):
     """
         A port in a router
     """
     fields = ("name", "purged", "admin_user", "admin_password", "admin_tenant", "auth_url", "address", "project",
-              "subnet", "host", "network", "portsecurity")
-    map = {"subnet": lambda x, y: y.subnet.name,
+              "subnet", "host", "network", "portsecurity", "dhcp")
+    map = {"address": get_port_address,
+           "subnet": lambda x, y: y.subnet.name,
            "network": lambda x, y: y.subnet.network.name,
            "host": lambda x, y: y.host.name,
            "project": lambda x, y: y.project.name,
@@ -203,31 +225,31 @@ def security_rules_to_json(exporter, group):
     for rule in group.rules:
         json_rule = {"protocol": rule.ip_protocol,
                      "direction": rule.direction}
-    
+
         if rule.port > 0:
             json_rule["port_range_min"] = rule.port
             json_rule["port_range_max"] = rule.port
-        
+
         else:
             json_rule["port_range_min"] = rule.port
             json_rule["port_range_max"] = rule.port
-            
+
         if json_rule["port_range_min"] == 0:
             json_rule["port_range_min"] = None
-            
+
         if json_rule["port_range_max"] == 0:
             json_rule["port_range_max"] = None
 
-        try:        
+        try:
             json_rule["remote_ip_prefix"] = rule.remote_prefix
         except Exception:
             pass
-            
+
         try:
             json_rule["remote_group"] = rule.remote_group
         except Exception:
             pass
-        
+
         rules.append(json_rule)
 
     return rules
@@ -261,61 +283,62 @@ class Project(Resource):
     fields = ("name", "enabled", "description", "admin_token", "url", "purged",
               "admin_user", "admin_password", "admin_tenant", "auth_url", "manage")
 
-    map = {"admin_token" : lambda x, y: y.provider.token,
-           "url" : lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
+    map = {"admin_token": lambda x, y: y.provider.token,
+           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
            "admin_user": lambda x, y: y.provider.username,
            "admin_password": lambda x, y: y.provider.password,
            "admin_tenant": lambda x, y: y.provider.tenant,
            "auth_url": lambda x, y: y.provider.connection_url}
 
 
-@resource("openstack::User", agent = "provider.name", id_attribute = "name")
+@resource("openstack::User", agent="provider.name", id_attribute="name")
 class User(Resource):
     """
         A user in keystone
     """
     fields = ("name", "email", "enabled", "password", "admin_token", "url", "purged",
               "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"admin_token" : lambda x, y: y.provider.token,
-           "url" : lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
+    map = {"admin_token": lambda x, y: y.provider.token,
+           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
            "admin_user": lambda x, y: y.provider.username,
            "admin_password": lambda x, y: y.provider.password,
            "admin_tenant": lambda x, y: y.provider.tenant,
            "auth_url": lambda x, y: y.provider.connection_url}
 
 
-@resource("openstack::Role", agent = "provider.name", id_attribute = "role_id")
+@resource("openstack::Role", agent="provider.name", id_attribute="role_id")
 class Role(Resource):
     """
         A role that adds a user to a project
     """
     fields = ("role_id", "role", "project", "user", "admin_token", "url", "purged",
               "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"project" : lambda x, obj: obj.project.name, "user" : lambda x, obj: obj.user.name,
-           "admin_token" : lambda x, y: y.provider.token,
-           "url" : lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
+    map = {"project": lambda x, obj: obj.project.name,
+           "user": lambda x, obj: obj.user.name,
+           "admin_token": lambda x, y: y.provider.token,
+           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
            "admin_user": lambda x, y: y.provider.username,
            "admin_password": lambda x, y: y.provider.password,
            "admin_tenant": lambda x, y: y.provider.tenant,
            "auth_url": lambda x, y: y.provider.connection_url}
 
 
-@resource("openstack::Service", agent = "provider.name", id_attribute = "name")
+@resource("openstack::Service", agent="provider.name", id_attribute="name")
 class Service(Resource):
     """
         A service for which endpoints can be registered
     """
     fields = ("name", "type", "description", "admin_token", "url", "purged",
               "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"admin_token" : lambda x, y: y.provider.token,
-           "url" : lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
+    map = {"admin_token": lambda x, y: y.provider.token,
+           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
            "admin_user": lambda x, y: y.provider.username,
            "admin_password": lambda x, y: y.provider.password,
            "admin_tenant": lambda x, y: y.provider.tenant,
            "auth_url": lambda x, y: y.provider.connection_url}
 
 
-@resource("openstack::EndPoint", agent = "provider.name", id_attribute = "service_id")
+@resource("openstack::EndPoint", agent="provider.name", id_attribute="service_id")
 class EndPoint(Resource):
     """
         An endpoint for a service
@@ -323,8 +346,8 @@ class EndPoint(Resource):
     fields = ("region", "internal_url", "public_url", "admin_url", "service_id", "admin_token",
               "url", "purged", "admin_user", "admin_password", "admin_tenant",
               "auth_url")
-    map = {"admin_token" : lambda x, y: y.provider.token,
-           "url" : lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
+    map = {"admin_token": lambda x, y: y.provider.token,
+           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
            "admin_user": lambda x, y: y.provider.username,
            "admin_password": lambda x, y: y.provider.password,
            "admin_tenant": lambda x, y: y.provider.tenant,
@@ -358,157 +381,103 @@ class VMHandler(ResourceHandler):
         self._client = None
         self._neutron = None
 
+    @cache(timeout=10)
+    def get_vm(self, name):
+        server = self._client.servers.list(search_opts={"name": name})
+
+        if len(server) == 0:
+            return None
+
+        elif len(server) == 1:
+            return server[0]
+
+        else:
+            raise Exception("Multiple virtual machines with name %s exist." % name)
+
     def check_resource(self, resource):
         """
             This method will check what the status of the give resource is on
             openstack.
         """
-        LOGGER.debug("Checking state of resource %s" % resource)
-        vm_state = {}
-        vm_list = {s.name: s for s in self._client.servers.list()}
+        current = resource.clone()
+        server = self.get_vm(resource.name)
 
-        # how the vm doing
-        if resource.name in vm_list:
-            vm_state["vm"] = "active"
-            vm_state["id"] = vm_list[resource.name].id
+        if server is None:
+            current.purged = True
+
         else:
-            vm_state["vm"] = "purged"
+            current.purged = False
+            current.security_groups = [sg.name for sg in server.list_security_group()]
+            # The port handler has to handle all network/port related changes
 
-        # check if the key is there
-        keys = {k.name: k for k in self._client.keypairs.list()}
+        return current
 
-        # TODO: also check the key itself
-        if resource.key_name in keys:
-            vm_state["key"] = True
-        else:
-            vm_state["key"] = False
-
-        return vm_state
-
-    def _list_changes(self, resource):
+    def list_changes(self, resource):
         """
             List the changes that are required to the vm
         """
-        vm_state = self.check_resource(resource)
-        LOGGER.debug("Determining changes required to resource %s" % resource.id)
+        current = self.check_resource(resource)
+        return self._diff(current, resource)
 
-        changes = {}
+    @cache(timeout=10)
+    def _port_id(self, port_name):
+        ports = self._neutron.list_ports(name=port_name)
+        if len(ports["ports"]) > 0:
+            return ports["ports"][0]["id"]
 
-        if not vm_state["key"]:
-            changes["key"] = (resource.key_name, resource.key_value)
+        return None
 
-        purged = "active"
-        if resource.purged:
-            purged = "purged"
+    @cache(timeout=10)
+    def _get_subnet_id(self, subnet_name):
+        subnets = self._neutron.list_subnets(name=subnet_name)
+        if len(subnets["subnets"]) > 0:
+            return subnets["subnets"][0]["network_id"]
 
-        if vm_state["vm"] != purged:
-            changes["state"] = (vm_state["vm"], purged)
+        return None
 
-        if "id" in vm_state:
-            return changes, vm_state["id"]
+    def _create_nic_config(self, port):
+        nic = {}
+        port_id = self._port_id(port["name"])
+        if port_id is None:
+            network = self._get_subnet_id(port["network"])
+            if network is None:
+                return None
+            nic["net-id"] = network
+            if not port["dhcp"] and port["address"] is not None:
+                nic["v4-fixed-ip"] = port["address"]
+        else:
+            nic["port-id"] = port_id
 
-        return changes, None
+        return nic
 
-    def list_changes(self, resource):
-        changes, _ = self._list_changes(resource)
-        return changes
+    def _build_nic_list(self, ports):
+        # build a list of nics for this server based on the index in the ports
+        no_sort = sorted([p for p in ports if p["index"] == 0], key=lambda x: x["network"])
+        sort = sorted([p for p in ports if p["index"] > 0], key=lambda x: x["index"])
 
-    def get_extra_port_config(self, resource):
-        # best effort, neutron handler will fix if required
-
-        xc = json.loads(resource.extraconfig)
-        xc = [v for k, v in xc.items() if k.index("neutron.port.") == 0]
-
-        if len(xc) == 0:
-            return []
-
-        client = self._neutron
-
-        out = []
-
-        for prt in xc:
-            ports = client.list_ports(name=prt["name"])['ports']
-            if len(ports) > 1:
-                continue
-
-            nw = self.cache.get_or_else(
-                key="nova_networks", function=client.list_networks, timeout=60, name=prt["network"])['networks']
-            if len(nw) != 1:
-                continue
-            network_id = nw[0]["id"]
-
-            nw = self.cache.get_or_else(
-                key="nova_subnets", function=client.list_subnets,  timeout=60, name=prt["subnet"])['subnets']
-            if len(nw) != 1:
-                continue
-            subnet_id = nw[0]["id"]
-
-            if len(ports) == 1:
-                port = ports[0]
-                if port["network_id"] != network_id:
-                    continue
-                if 'fixed_ips' not in port or len(port['fixed_ips']) != 1 or port['fixed_ips'][0]['subnet_id'] != subnet_id or port['fixed_ips'][0]['ip_address'] != prt["address"]:
-                    continue
-                port_id = port['id']
-            else:
-                body_value = {'port': {
-                    'admin_state_up': True,
-                    'name': prt["name"],
-                    'network_id': network_id
-                }
-                }
-
-                body_value["port"]["fixed_ips"] = [{"subnet_id": subnet_id, "ip_address": prt["address"]}]
-
-                result = client.create_port(body=body_value)
-
-                if "port" not in result:
-                    continue
-
-                port_id = result["port"]["id"]
-            out.append({"port-id": port_id})
-        return out
+        return [self._create_nic_config(p) for p in sort] + [self._create_nic_config(p) for p in no_sort]
 
     def do_changes(self, resource):
-        """
-            Enact the changes
-        """
-        changes, vm_id = self._list_changes(resource)
+        changes = self.list_changes(resource)
 
-        if len(changes) > 0:
-            LOGGER.debug("Making changes to resource %s" % resource.id)
-            if "key" in changes:
-                self._client.keypairs.create(changes["key"][0], changes["key"][1])
+        # First ensure the key is there.
+        # TODO: move this to a specific resource
+        keys = {k.name: k for k in self._client.keypairs.list()}
+        if resource.key_name not in keys:
+            self._client.keypairs.create(resource.key_name, resource.key_value)
 
-            if "state" in changes:
-                if changes["state"][0] == "purged" and changes["state"][1] == "active":
-                    flavor = self._client.flavors.find(name=resource.flavor)
-                    network = self._client.networks.find(human_id=resource.network)
+        if "purged" in changes:
+            if changes["purged"][0]:  # create
+                flavor = self._client.flavors.find(name=resource.flavor)
+                nics = self._build_nic_list(resource.ports)
+                server = self._client.servers.create(resource.name, flavor=flavor.id,
+                                                     security_groups=resource.security_groups,
+                                                     image=resource.image, key_name=resource.key_name,
+                                                     userdata=resource.user_data, nics=nics)
+            elif changes["state"][1] == "purged" and changes["state"][0] == "active":
+                server = self._client.servers.find(name=resource.name)
+                server.delete()
 
-                    nics = [{"net-id": network.id}] + self.get_extra_port_config(resource)
-
-                    server = self._client.servers.create(resource.name, flavor=flavor.id,
-                                                         image=resource.image, key_name=resource.key_name,
-                                                         userdata=resource.user_data, nics=nics)
-                    vm_id = server.id
-
-                elif changes["state"][1] == "purged" and changes["state"][0] == "active":
-                    server = self._client.servers.find(name=resource.name)
-                    server.delete()
-
-        if vm_id is not None:
-            client = self._neutron
-
-            ports = client.list_ports(device_id=vm_id)
-            if "ports" in ports and len(ports["ports"]) > 0:
-                try:
-                    port = ports["ports"][0]
-                    client.update_port(port=port["id"], body={"port":
-                                                          {"port_security_enabled": False,
-                                                           "security_groups": None}})
-                except:
-                    # can happen, less important
-                    pass
         return True
 
     @cache(timeout=1)
@@ -562,7 +531,7 @@ def neutron_dependencies(config_model, resource_model):
     routers = {}
     subnets = {}
 
-    for name, resource in resource_model.items():
+    for _, resource in resource_model.items():
         if resource.id.entity_type == "openstack::Project":
             projects[resource.name] = resource
 
@@ -789,8 +758,8 @@ class NetworkHandler(NeutronHandler):
 
     def _create_dict(self, resource: Network, project_id):
         net = {"name": resource.name,
-                "tenant_id": project_id,
-                "admin_state_up": True}
+               "tenant_id": project_id,
+               "admin_state_up": True}
 
         if resource.physical_network != "":
             net["provider:physical_network"] = resource.physical_network
@@ -885,7 +854,6 @@ class RouterHandler(NeutronHandler):
 
             ports = self._client.list_ports(device_id=current.id)
             subnet_list = []
-            port_list = []
             for port in ports["ports"]:
                 subnets = port["fixed_ips"]
                 if port["name"] == "" or port["name"] not in current.ports:
@@ -1361,9 +1329,9 @@ class SecurityGroupHandler(NeutronHandler):
         sgs = self._client.list_security_groups(name=name)
         if len(sgs["security_groups"]) == 0:
             return None
-        
+
         return sgs["security_groups"][0]
-    
+
     def check_resource(self, resource: SecurityGroup) -> SecurityGroup:
         """ Check the state of the resource
         """
@@ -1373,64 +1341,63 @@ class SecurityGroupHandler(NeutronHandler):
             current.purged = True
             current.rules = []
             return current
-        
+
         current.description = sg["description"]
         current.__id = sg["id"]
         current.rules = []
         for rule in sg["security_group_rules"]:
             if rule["ethertype"] != "IPv4":
                 continue
-            
+
             current_rule = {"__id": rule["id"]}
             if rule["protocol"] is None:
                 current_rule["protocol"] = "all"
             else:
                 current_rule["protocol"] = rule["protocol"]
-            
+
             if rule["remote_ip_prefix"] is not None:
                 current_rule["remote_ip_prefix"] = rule["remote_ip_prefix"]
-                
+
             elif rule["remote_group_id"] is not None:
                 current_rule["remote_ip_prefix"] = rule["remote_group_id"]
-                
+
             else:
                 current_rule["remote_ip_prefix"] = "0.0.0.0/0"
-                
+
             current_rule["direction"] = rule["direction"]
             current_rule["port_range_min"] = rule["port_range_min"]
             current_rule["port_range_max"] = rule["port_range_max"]
-            
+
             current.rules.append(current_rule)
 
         return current
-    
+
     def _compare_rule(self, old, new):
         old_keys = set([x for x in old.keys() if not x.startswith("__")])
         new_keys = set([x for x in new.keys() if not x.startswith("__")])
-        
+
         if old_keys != new_keys:
             return False
-        
+
         for key in old_keys:
             if old[key] != new[key]:
                 return False
-            
+
         return True
-    
+
     def _update_rules(self, group_id, resource, changes):
-        ## Update rules. First add all new rules, than remove unused rules
+        # # Update rules. First add all new rules, than remove unused rules
         old_rules = list(changes["rules"][0])
         new_rules = list(changes["rules"][1])
-        
+
         for new_rule in changes["rules"][1]:
             for old_rule in changes["rules"][0]:
                 if self._compare_rule(old_rule, new_rule):
                     old_rules.remove(old_rule)
                     new_rules.remove(new_rule)
                     break
-        
+
         for new_rule in new_rules:
-            print(new_rule)
             new_rule["ethertype"] = "IPv4"
             if "remote_group_id" in new_rule:
                 if new_rule["remote_group_id"] is not None:
@@ -1438,34 +1405,57 @@ class SecurityGroupHandler(NeutronHandler):
                     groups = self._client.list_security_groups(name="test")["security_groups"]
                     if len(groups) == 0:
                         # TODO: log skip rule
-                        continue # Do not update this rule
-                    
+                        continue  # Do not update this rule
+
                     new_rule["remote_group_id"] = groups[0]["id"]
-                    
+
                 else:
                     del new_rule["remote_group_id"]
-                
+
             new_rule["security_group_id"] = group_id
-                                            
+
             self._client.create_security_group_rule({'security_group_rule': new_rule})
-                                                               
+
         for old_rule in old_rules:
             self._client.delete_security_group_rule(old_rule["__id"])
-        
+
+    def list_changes(self, resource):
+        """
+            List the changes that are required to the security group
+        """
+        current = self.check_resource(resource)
+        changes = self._diff(current, resource)
+
+        if "rules" in changes:
+            old_rules = list(changes["rules"][0])
+            new_rules = list(changes["rules"][1])
+
+            for new_rule in changes["rules"][1]:
+                for old_rule in changes["rules"][0]:
+                    if self._compare_rule(old_rule, new_rule):
+                        old_rules.remove(old_rule)
+                        new_rules.remove(new_rule)
+                        break
+
+            if len(old_rules) == 0 and len(new_rules) == 0:
+                del changes["rules"]
+
+        return changes
+
     def do_changes(self, resource: SecurityGroup) -> SecurityGroup:
         """ Enforce the changes
         """
         changes = self.list_changes(resource)
         changed = False
-        
+
         sg_id = None
         if "purged" in changes:
             changed = True
-            if changes["purged"][0] == True: # create
+            if changes["purged"][0] == True:  # create
                 sg = self._client.create_security_group({"security_group": {"name": resource.name,
                                                                             "description": resource.description}})
                 sg_id = sg["security_group"]["id"]
-            else: # purge
+            else:  # purge
                 sg = self.get_security_group(resource.name)
                 if sg is not None:
                     self._client.delete_security_group(sg["id"])
@@ -1475,7 +1465,7 @@ class SecurityGroupHandler(NeutronHandler):
             sg = self.get_security_group(resource.name)
             if sg is None:
                 raise Exception("Unable to modify unexisting security group")
-            
+
             self._client.update_security_group(sg["id"], {"security_group": {"name": resource.name,
                                                                              "description": resource.description}})
             sg_id = sg["id"]
@@ -1485,8 +1475,8 @@ class SecurityGroupHandler(NeutronHandler):
 
         return changed
 
-#    @cache(timeout=5)
-    def facts(self, resource: SecurityGroup):
+    @cache(timeout=5)
+    def facts(self, resource):
         """ Discover facts about this securitygroup
         """
         return {}
@@ -1504,13 +1494,12 @@ class FloatingIPHandler(NeutronHandler):
         """ Enforce the changes
         """
         changes = self.list_changes(resource)
-
         changed = False
 
         return changed
 
-#    @cache(timeout=5)
-    def facts(self, resource: FloatingIP):
+    @cache(timeout=5)
+    def facts(self, resource):
         """ Discover facts about this floating_ip
         """
         floating_ips = self._client.list_floatingips()
@@ -1523,7 +1512,7 @@ def keystone_dependencies(config_model, resource_model):
     projects = {}
     users = {}
     roles = []
-    for name,resource in resource_model.items():
+    for _, resource in resource_model.items():
         if resource.id.entity_type == "openstack::Project":
             projects[resource.name] = resource
 
@@ -1578,7 +1567,7 @@ class KeystoneHandler(ResourceHandler):
         return self._diff(current, resource)
 
 
-@provider("openstack::Project", name = "openstack")
+@provider("openstack::Project", name="openstack")
 class ProjectHandler(KeystoneHandler):
     @classmethod
     def is_available(self, io):
@@ -1616,10 +1605,10 @@ class ProjectHandler(KeystoneHandler):
         return project, self._diff(current, resource)
 
     def list_changes(self, resource):
-        project, changes = self._list_changes(resource)
+        _, changes = self._list_changes(resource)
         return changes
 
-    def do_changes(self, resource : Project) -> bool:
+    def do_changes(self, resource: Project) -> bool:
         """
             Enforce the changes
         """
@@ -1630,7 +1619,7 @@ class ProjectHandler(KeystoneHandler):
 
         changed = False
         if "purged" in changes:
-            if changes["purged"][1] == False: # create the project
+            if changes["purged"][1] == False:  # create the project
                 project.tenants.create(resource.name, description=resource.description, enabled=resource.enabled)
                 changed = True
 
@@ -1644,7 +1633,7 @@ class ProjectHandler(KeystoneHandler):
 
         return changed
 
-    def facts(self, resource : Project):
+    def facts(self, resource: Project):
         """
             Get facts about this resource
         """
@@ -1656,7 +1645,7 @@ class ProjectHandler(KeystoneHandler):
             return {}
 
 
-@provider("openstack::User", name = "openstack")
+@provider("openstack::User", name="openstack")
 class UserHandler(KeystoneHandler):
     @classmethod
     def is_available(self, io):
@@ -1698,7 +1687,7 @@ class UserHandler(KeystoneHandler):
         return user, self._diff(current, resource)
 
     def list_changes(self, resource):
-        user, changes = self._list_changes(resource)
+        _, changes = self._list_changes(resource)
         return changes
 
     def do_changes(self, resource):
@@ -1706,11 +1695,10 @@ class UserHandler(KeystoneHandler):
             Enforce the changes
         """
         user, changes = self._list_changes(resource)
-        body = {"user": {"email": resource.email, "password": resource.password, "enabled": resource.enabled, "name": resource.name}}
 
         changed = False
         if "purged" in changes:
-            if changes["purged"][1] == False: # create a new user
+            if changes["purged"][1] == False:  # create a new user
                 user.users.create(resource.name, resource.password, email=resource.email, enabled=resource.enabled)
                 changed = True
 
@@ -1773,7 +1761,7 @@ class RoleHandler(KeystoneHandler):
         return user, project, role, self._diff(current, resource)
 
     def list_changes(self, resource):
-        user, project, role, changes = self._list_changes(resource)
+        _, _, _, changes = self._list_changes(resource)
         return changes
 
     def do_changes(self, resource):
@@ -1792,7 +1780,7 @@ class RoleHandler(KeystoneHandler):
 
         # create, update or remove
         if "purged" in changes:
-            if changes["purged"][1] == False: # create a new role
+            if changes["purged"][1] == False:  # create a new role
                 keystone.roles.add_user_role(user, role, project)
                 changed = True
 
@@ -1803,7 +1791,7 @@ class RoleHandler(KeystoneHandler):
         return changed
 
 
-@provider("openstack::Service", name = "openstack")
+@provider("openstack::Service", name="openstack")
 class ServiceHandler(KeystoneHandler):
     @classmethod
     def is_available(self, io):
@@ -1847,7 +1835,7 @@ class ServiceHandler(KeystoneHandler):
 
         changed = False
         if "purged" in changes:
-            if changes["purged"][0]: # it's new
+            if changes["purged"][0]:  # it's new
                 service.services.create(resource.name, resource.type, resource.description)
                 changed = True
 
@@ -1861,7 +1849,7 @@ class ServiceHandler(KeystoneHandler):
         return changed
 
 
-@provider("openstack::EndPoint", name = "openstack")
+@provider("openstack::EndPoint", name="openstack")
 class EndpointHandler(KeystoneHandler):
     @classmethod
     def is_available(self, io):
@@ -1884,7 +1872,7 @@ class EndpointHandler(KeystoneHandler):
             raise Exception("Unable to find service to which endpoint belongs")
 
         try:
-            endpoint = keystone.endpoints.find(service_id = service.id)
+            endpoint = keystone.endpoints.find(service_id=service.id)
             current.region = endpoint.region
             current.internal_url = endpoint.internalurl
             current.admin_url = endpoint.adminurl
@@ -1916,24 +1904,23 @@ class EndpointHandler(KeystoneHandler):
         changed = False
 
         if "purged" in changes:
-            if changes["purged"][0]: # it is new
+            if changes["purged"][0]:  # it is new
                 endpoint.endpoints.create(region=resource.region, service_id=service.id,
-                    publicurl=resource.public_url, adminurl=resource.admin_url,
-                    internalurl=resource.internal_url)
+                                          publicurl=resource.public_url, adminurl=resource.admin_url,
+                                          internalurl=resource.internal_url)
 
                 changed = True
 
-            else: # delete
+            else:  # delete
                 endpoint.delete()
                 changed = True
 
         elif len(changes) > 0:
             endpoint.manager.delete(endpoint.id)
             endpoint.manager.create(region=resource.region, service_id=service.id,
-                    publicurl=resource.public_url, adminurl=resource.admin_url,
-                    internalurl=resource.internal_url)
+                                    publicurl=resource.public_url, adminurl=resource.admin_url,
+                                    internalurl=resource.internal_url)
 
             changed = True
 
         return changed
-

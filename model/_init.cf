@@ -169,7 +169,7 @@ entity Port extends NeutronEntity:
     """
         A port on a network
     """
-    ip::ip address=""
+    ip::ip address
 end
 
 Project project [1] -- [0:] Port ports
@@ -194,17 +194,14 @@ entity HostPort extends Port:
     string name
     bool portsecurity = true
     bool purge_on_delete = true
+    bool dhcp=true
+    number port_index=0
 end
 
-Subnet subnet [1] -- [0:] HostPort hostports
-vm::Host host [1] -- [0:] HostPort extraports
+implement HostPort using std::none
 
-implementation reqsHP for HostPort:
-    self.requires = [host, subnet]
-    self.host.extraconfig = vm::ExtraConfig(name="neutron.port.{{name}}",content = std::template("neutron/port_extraconfig.tmpl"))
-end
-
-implement HostPort using reqsHP
+Subnet subnet [1] -- [0:] HostPort host_ports
+Host host [1] -- [0:] HostPort ports
 
 index HostPort(provider, name)
 
@@ -277,6 +274,7 @@ implement SecurityGroup using std::none
 
 SecurityGroup security_groups [0:] -- [1] Provider provider
 SecurityGroup security_groups [0:] -- [1] Project project
+SecurityGroup security_groups [0:] -- [1] Host host
 
 entity SecurityRule:
     """
@@ -314,6 +312,7 @@ end
 implementation fipName for FloatingIP:
     # We need a consistent and unique name to identity the fip
     self.name = "{{router.name}}_{{host.name}}"
+#    neutron::validate_floatingip_attachment()
 end
 index FloatingIP(router, host)
 
@@ -322,9 +321,8 @@ implement FloatingIP using fipName
 FloatingIP floating_ips [0:] -- [1] Project project
 FloatingIP floating_ips [0:] -- [1] Provider provider
 FloatingIP floating_ips [0:] -- [1] Router router
-FloatingIP floating_ips [0:] -- [1] Host host
-
-SecurityGroup security_groups [0:] -- [1] Host host
+FloatingIP floating_ips [0:] -- [0:1] Host host
+FloatingIP floating_ips [0:] -- [0:1] HostPort port
 
 entity Host extends ip::Host:
     string flavor
@@ -336,23 +334,18 @@ end
 
 implement Host using std::hostDefaults, ipFact
 
-entity ExtraConfig:
-    """
-        an object for handlers to add config to the resource
-    """
-    string name
-    string content
-end
-
-implement ExtraConfig using std::none
-
-Host host [1] -- [0:] ExtraConfig extraconfig
-
 implementation ipFact for Host:
     self.ip = std::getfact(self, "ip_address")
 end
 
-Subnet subnet [1] -- [0:] Host hosts
+implementation eth0Port for Host:
+    port = HostPort(provider=provider, host=self, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self, "ip_address"),
+                    purged=false, project=project, port_index=1)
+end
+
+implement Host using eth0Port when subnet is defined
+
+Subnet subnet [0:1] -- [0:] Host hosts
 ssh::Key key_pair [1] -- [0:] Host openstack_hosts
 Project project [1] -- [0:] Host hosts
 Provider provider [1] -- [0:] Host openstack_hosts
