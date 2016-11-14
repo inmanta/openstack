@@ -270,11 +270,13 @@ entity SecurityGroup:
     bool purge_on_delete=false
 end
 
+index SecurityGroup(project, name)
+
 implement SecurityGroup using std::none
 
 SecurityGroup security_groups [0:] -- [1] Provider provider
 SecurityGroup security_groups [0:] -- [1] Project project
-SecurityGroup security_groups [0:] -- [1] Host host
+SecurityGroup security_groups [0:] -- [0:] Host host
 
 entity SecurityRule:
     """

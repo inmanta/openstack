@@ -246,12 +246,11 @@ def security_rules_to_json(exporter, group):
             pass
 
         try:
-            json_rule["remote_group"] = rule.remote_group
+            json_rule["remote_group"] = rule.remote_group.name
         except Exception:
             pass
 
         rules.append(json_rule)
-
     return rules
 
 
