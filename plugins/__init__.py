@@ -436,6 +436,20 @@ class VMHandler(ResourceHandler):
 
         return None
 
+    @cache(timeout=60)
+    def get_security_group(self, name=None, id=None):
+        """ Get security group details from openstack
+        """
+        if name is not None:
+            sgs = self._client.list_security_groups(name=name)
+        elif id is not None:
+            sgs = self._client.list_security_groups(id=id)
+
+        if len(sgs["security_groups"]) == 0:
+            return None
+
+        return sgs["security_groups"][0]
+
     def _create_nic_config(self, port):
         nic = {}
         port_id = self._port_id(port["name"])
@@ -458,6 +472,13 @@ class VMHandler(ResourceHandler):
 
         return [self._create_nic_config(p) for p in sort] + [self._create_nic_config(p) for p in no_sort]
 
+    def _build_sg_list(self, security_groups):
+        sg_list = []
+        for group in security_groups:
+            sg = self.get_security_group(name=group)
+            sg_list.append(sg["name"])
+        return sg_list
+
     def do_changes(self, resource):
         changes = self.list_changes(resource)
 
@@ -472,16 +493,26 @@ class VMHandler(ResourceHandler):
                 flavor = self._client.flavors.find(name=resource.flavor)
                 nics = self._build_nic_list(resource.ports)
                 server = self._client.servers.create(resource.name, flavor=flavor.id,
-                                                     security_groups=resource.security_groups,
+                                                     security_groups=self._build_sg_list(resource.security_groups),
                                                      image=resource.image, key_name=resource.key_name,
                                                      userdata=resource.user_data, nics=nics)
-            elif changes["state"][1] == "purged" and changes["state"][0] == "active":
+            elif changes["purged"][1]:
                 server = self._client.servers.find(name=resource.name)
                 server.delete()
 
+        elif "security_groups" in changes:
+            current = set(changes["security_groups"][0])
+            desired = set(changes["security_groups"][1])
+            
+            server = self._client.servers.find(name=resource.name)
+            for new_rule in (desired-current):
+                self._client.servers.add_security_group(server, new_rule)
+
+            for remove_rule in (current-desired):
+                self._client.servers.remove_security_group(server, remove_rule)
+
         return True
 
-    @cache(timeout=1)
     def facts(self, resource):
         """
             Get facts about this resource
@@ -489,38 +520,25 @@ class VMHandler(ResourceHandler):
         LOGGER.debug("Finding facts for %s" % resource.id.resource_str())
 
         try:
-            vm = self.cache.get_or_else(
-                key="nova_servers", function=self._client.servers.find, timeout=60, name=resource.name)
+            vm = self.cache.get_or_else(key="nova_servers", function=self._client.servers.find, timeout=60, name=resource.name)
 
             networks = vm.networks
 
-            if resource.network in networks:
-                ips = networks[resource.network]
-            else:
-                ips = []
-                for net in networks.values():
-                    ips.extend(net)
-
             facts = {}
-            if len(ips) > 1:
-                LOGGER.warning("Facts only supports one interface per vm. Only the first interface is reported")
+            for name, ips in networks.items():
+                for i in range(len(ips)):
+                    facts["subnet_%s_ip_%d" % (name, i)] = ips[i]
+                    if i == 0:
+                        facts["subnet_%s_ip" % name] = ips[i]
 
-            if len(ips) > 0:
-                facts["ip_address"] = ips[0]
-
-                # lookup network details of this ip
-                for net, addresses in vm.addresses.items():
-                    for addr in addresses:
-                        if addr["addr"] == facts["ip_address"]:
-                            client = self._neutron
-
-                            subnets = self.cache.get_or_else(
-                                key="nova_subnets", function=client.list_subnets, timeout=60, name=net)
-                            if "subnets" in subnets and len(subnets["subnets"]) == 1:
-                                facts["cidr"] = subnets["subnets"][0]["cidr"]
+            # report the first ip of the port with index 1 as "ip_address"
+            for port in resource.ports:
+                if port["index"] == 1:
+                    if port["network"] in networks:
+                        ips = networks[port["network"]]
+                        facts["ip_address"] = ips[0]
 
             return facts
-
         except Exception:
             return {}
 
@@ -1324,10 +1342,14 @@ class HostPortHandler(NeutronHandler):
 @provider("openstack::SecurityGroup", name="openstack")
 class SecurityGroupHandler(NeutronHandler):
     @cache(timeout=60)
-    def get_security_group(self, name):
+    def get_security_group(self, name=None, id=None):
         """ Get security group details from openstack
         """
-        sgs = self._client.list_security_groups(name=name)
+        if name is not None:
+            sgs = self._client.list_security_groups(name=name)
+        elif id is not None:
+            sgs = self._client.list_security_groups(id=id)
+
         if len(sgs["security_groups"]) == 0:
             return None
 
@@ -1337,14 +1359,13 @@ class SecurityGroupHandler(NeutronHandler):
         """ Check the state of the resource
         """
         current = resource.clone()
-        sg = self.get_security_group(resource.name)
+        sg = self.get_security_group(name=resource.name)
         if sg is None:
             current.purged = True
             current.rules = []
             return current
 
         current.description = sg["description"]
-        current.__id = sg["id"]
         current.rules = []
         for rule in sg["security_group_rules"]:
             if rule["ethertype"] != "IPv4":
@@ -1360,7 +1381,8 @@ class SecurityGroupHandler(NeutronHandler):
                 current_rule["remote_ip_prefix"] = rule["remote_ip_prefix"]
 
             elif rule["remote_group_id"] is not None:
-                current_rule["remote_ip_prefix"] = rule["remote_group_id"]
+                rgi = self.get_security_group(id=rule["remote_group_id"])
+                current_rule["remote_group"] = rgi["name"]
 
             else:
                 current_rule["remote_ip_prefix"] = "0.0.0.0/0"
@@ -1400,14 +1422,15 @@ class SecurityGroupHandler(NeutronHandler):
 
         for new_rule in new_rules:
             new_rule["ethertype"] = "IPv4"
-            if "remote_group_id" in new_rule:
-                if new_rule["remote_group_id"] is not None:
+            if "remote_group" in new_rule:
+                if new_rule["remote_group"] is not None:
                     # lookup the id of the group
-                    groups = self._client.list_security_groups(name="test")["security_groups"]
+                    groups = self._client.list_security_groups(name=new_rule["remote_group"])["security_groups"]
                     if len(groups) == 0:
                         # TODO: log skip rule
                         continue  # Do not update this rule
 
+                    del new_rule["remote_group"]
                     new_rule["remote_group_id"] = groups[0]["id"]
 
                 else:
@@ -1415,7 +1438,11 @@ class SecurityGroupHandler(NeutronHandler):
 
             new_rule["security_group_id"] = group_id
 
-            self._client.create_security_group_rule({'security_group_rule': new_rule})
+            try:
+                self._client.create_security_group_rule({'security_group_rule': new_rule})
+            except exceptions.Conflict:
+                LOGGER.exception("Rule conflict for rule %s", new_rule)
+                raise
 
         for old_rule in old_rules:
             self._client.delete_security_group_rule(old_rule["__id"])
@@ -1457,13 +1484,13 @@ class SecurityGroupHandler(NeutronHandler):
                                                                             "description": resource.description}})
                 sg_id = sg["security_group"]["id"]
             else:  # purge
-                sg = self.get_security_group(resource.name)
+                sg = self.get_security_group(name=resource.name)
                 if sg is not None:
                     self._client.delete_security_group(sg["id"])
                     sg_id = sg["id"]
 
         elif len(changes) > 0:
-            sg = self.get_security_group(resource.name)
+            sg = self.get_security_group(name=resource.name)
             if sg is None:
                 raise Exception("Unable to modify unexisting security group")
 
