@@ -192,8 +192,8 @@ entity HostPort extends Port:
         A port attached to a VM
     """
     string name
-    bool portsecurity = true
-    bool purge_on_delete = true
+    bool portsecurity=true
+    bool purge_on_delete=true
     bool dhcp=true
     number port_index=0
 end
@@ -267,7 +267,7 @@ entity SecurityGroup:
     string name
     bool manage_all=true
     bool purged=false
-    bool purge_on_delete=false
+    bool purge_on_delete=true
 end
 
 index SecurityGroup(project, name)
@@ -307,28 +307,28 @@ SecurityRule rules [0:] -- [1] SecurityGroup group
 
 entity FloatingIP:
     bool purged=false
-    bool purge_on_delete=false
+    bool purge_on_delete=true
     string name
 end
 
 implementation fipName for FloatingIP:
     # We need a consistent and unique name to identity the fip
-    self.name = "{{router.name}}_{{port.name}}"
+    self.name = "{{external_network.name}}_{{port.name}}"
 #    neutron::validate_floatingip_attachment()
 end
-index FloatingIP(router, port)
+index FloatingIP(external_network, port)
 
 implement FloatingIP using fipName
 
 FloatingIP floating_ips [0:] -- [1] Project project
 FloatingIP floating_ips [0:] -- [1] Provider provider
-FloatingIP floating_ips [0:] -- [1] Router router
+FloatingIP floating_ips [0:] -- [1] Network external_network
 FloatingIP floating_ips [0:] -- [1] HostPort port
 
 entity Host extends ip::Host:
     string flavor
     string image
-    string user_data=""
+    string user_data
     bool   purged = false
     bool   purge_on_delete = true
 end
