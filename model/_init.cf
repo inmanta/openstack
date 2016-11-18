@@ -20,6 +20,15 @@ import ip::services
 import vm
 import ssh
 
+entity PurgeableResource:
+
+end
+
+entity OpenStackResource extends PurgeableResource:
+    bool purged=false
+    bool purge_on_delete=true
+end
+
 entity Provider:
     """
         The configuration for accessing an Openstack based IaaS
@@ -35,14 +44,10 @@ end
 
 index Provider(name)
 
-#implementation osConfig for OpenstackConfig:
-#    iaas.iaas_config_string = std::template("openstack/openstack_config.tmpl")
-#end
-
 implement Provider using std::none
 
 ## Keystone config
-entity Project:
+entity Project extends OpenStackResource:
     """
         A project / tenant in openstack
     """
@@ -50,14 +55,12 @@ entity Project:
     bool enabled
     string description
     bool manage=true
-    bool purged=false
-    bool purge_on_delete=true
 end
 index Project(provider, name)
-Project project [0:] -- [1] Provider provider
+Project projects [0:] -- [1] Provider provider
 implement Project using std::none
 
-entity User:
+entity User extends OpenStackResource:
     """
         A user in openstack. A handler for this entity type is loaded by agents.
 
@@ -74,14 +77,12 @@ entity User:
     string email
     bool enabled=true
     string password=""
-    bool purged=false
-    bool purge_on_delete=true
 end
 index User(provider, name)
-User user [0:] -- [1] Provider provider
+User users [0:] -- [1] Provider provider
 implement User using std::none
 
-entity Role:
+entity Role extends OpenStackResource:
     """
         A role in openstack. A role defines membership of a user in a project.
         This entity is used to connect users to projects. With this, it
@@ -91,9 +92,8 @@ entity Role:
     """
     string role_id
     string role
-    bool purged=false
 end
-Role role [0:] -- [1] Provider provider
+Role roles [0:] -- [1] Provider provider
 implement Role using roleImpl
 
 """
@@ -115,27 +115,25 @@ implementation roleImpl for Role:
     self.role_id = "{{ project.name }}_{{ user.name }}_{{ role }}"
 end
 
-entity Service:
+entity Service extends OpenStackResource:
     string name
     string type
     string description
-    bool purged = false
 end
 implement Service using std::none
-Service service [0:] -- [1] Provider provider
+Service services [0:] -- [1] Provider provider
 index Service(provider, name, type)
 
-entity EndPoint:
+entity EndPoint extends OpenStackResource:
     string region
     string internal_url
     string public_url
     string admin_url
     string service_id
-    bool purged = false
 end
 implement EndPoint using endPoint
 Service service [1] -- [0:1] EndPoint endpoint
-EndPoint endpoint [0:] -- [1] Provider provider
+EndPoint endpoints [0:] -- [1] Provider provider
 
 implementation endPoint for EndPoint:
     self.provider = self.service.provider
@@ -146,32 +144,32 @@ end
 ## Neutron config
 typedef admin_state as string matching self == "up" or self == "down"
 
-entity NeutronEntity:
-    """
-        An entity managed by neutron.
-    """
-    bool purged=false
-end
-
-NeutronEntity nes [0:] -- [1] Provider provider
-
-entity Network extends NeutronEntity, vm::Network:
+entity Network extends OpenStackResource:
     """
         A neutron network owned by a project
     """
+    string name
     bool external=false
     string physical_network=""
     string network_type=""
     number segmentation_id=0
 end
 
-entity Port extends NeutronEntity:
+Network networks [0:] -- [1] Provider provider
+Project project [1] -- [0:] Network networks
+
+index Network(provider, name)
+
+implement Network using std::none
+
+entity Port extends OpenStackResource:
     """
         A port on a network
     """
     ip::ip address
 end
 
+Port ports [0:] -- [1] Provider provider
 Project project [1] -- [0:] Port ports
 
 entity RouterPort extends Port:
@@ -193,7 +191,6 @@ entity HostPort extends Port:
     """
     string name
     bool portsecurity=true
-    bool purge_on_delete=true
     bool dhcp=true
     number port_index=0
 end
@@ -205,13 +202,7 @@ Host host [1] -- [0:] HostPort ports
 
 index HostPort(provider, name)
 
-index Network(provider, name)
-
-implement Network using std::none
-
-Project project [1] -- [0:] Network networks
-
-entity Subnet extends NeutronEntity:
+entity Subnet extends OpenStackResource:
     """
         A neutron network subnet
     """
@@ -227,6 +218,7 @@ implement Subnet using std::none
 
 index Subnet(name)
 
+Provider provider [1] -- [0:] Subnet subnets
 Project project [1] -- [0:] Subnet subnets
 Network network [1] -- [0:] Subnet subnets
 
@@ -239,7 +231,7 @@ entity Route:
 end
 implement Route using std::none
 
-entity Router extends NeutronEntity:
+entity Router extends OpenStackResource:
     """
         A router
     """
@@ -253,6 +245,7 @@ index Router(name)
 
 implement Router using std::none
 
+Router routers [0:] -- [1] Provider provider
 Router router [0:1] -- [0:] RouterPort ports
 Router router [0:1] -- [0:] Subnet subnets
 Router routers [0:] -- [0:1] Network ext_gateway
@@ -262,12 +255,10 @@ Project project [1] -- [0:] Router routers
 ## Nova config
 typedef direction as string matching self == "ingress" or self == "egress"
 
-entity SecurityGroup:
+entity SecurityGroup extends OpenStackResource:
     string description=""
     string name
     bool manage_all=true
-    bool purged=false
-    bool purge_on_delete=true
 end
 
 index SecurityGroup(project, name)
@@ -305,9 +296,7 @@ implement GroupRule using std::none
 
 SecurityRule rules [0:] -- [1] SecurityGroup group
 
-entity FloatingIP:
-    bool purged=false
-    bool purge_on_delete=true
+entity FloatingIP extends OpenStackResource:
     string name
 end
 
@@ -325,12 +314,10 @@ FloatingIP floating_ips [0:] -- [1] Provider provider
 FloatingIP floating_ips [0:] -- [1] Network external_network
 FloatingIP floating_ips [0:] -- [1] HostPort port
 
-entity Host extends ip::Host:
+entity Host extends ip::Host, OpenStackResource:
     string flavor
     string image
     string user_data
-    bool   purged = false
-    bool   purge_on_delete = true
 end
 
 Host eth0_host [1] -- [1] HostPort eth0_port

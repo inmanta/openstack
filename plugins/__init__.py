@@ -30,8 +30,10 @@ from http import client
 from inmanta.execute.proxy import UnknownException
 
 from inmanta.plugins import plugin
-from inmanta.resources import Resource, resource, ResourceNotFoundExcpetion
-from inmanta.agent.handler import provider, ResourceHandler, SkipResource, cache
+from inmanta.resources import Resource, resource, ResourceNotFoundExcpetion, PurgeableResource
+from inmanta import resources
+from inmanta.agent import handler
+from inmanta.agent.handler import provider, ResourceHandler, SkipResource, cache, ResourceHandler, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
 
 from neutronclient.common import exceptions
@@ -58,301 +60,498 @@ NULL_UUID = "00000000-0000-0000-0000-000000000000"
 NULL_ID = "00000000000000000000000000000000"
 
 
-def get_key_name(exporter, vm):
-    return vm.key_pair.name
+class OpenstackResource(PurgeableResource):
+    fields = ("project", "admin_user", "admin_password", "admin_tenant", "auth_url")
 
+    @staticmethod
+    def get_project(exporter, resource):
+        return resource.project.name
 
-def get_key_value(exporter, vm):
-    return vm.key_pair.public_key
+    @staticmethod
+    def get_admin_user(exporter, resource):
+        return resource.provider.username
 
+    @staticmethod
+    def get_admin_password(exporter, resource):
+        return resource.provider.password
 
-def get_user_data(exporter, vm):
-    """
-        Return an empty string when the user_data value is unknown
-        TODO: this is a hack
-    """
-    try:
-        ua = vm.user_data
-    except UnknownException:
-        ua = ""
-    # if ua is None or ua == "":
-    #    raise Exception("User data is required!")
-    return ua
+    @staticmethod
+    def get_admin_tenant(exporter, resource):
+        return resource.provider.tenant
 
-
-OS_FIELDS = ["project", "admin_user", "admin_password", "admin_tenant", "auth_url", "purged", "purge_on_delete"]
-OS_MAP = {"project": lambda x, y: y.project.name,
-          "admin_user": lambda x, y: y.provider.username,
-          "admin_password": lambda x, y: y.provider.password,
-          "admin_tenant": lambda x, y: y.provider.tenant,
-          "auth_url": lambda x, y: y.provider.connection_url
-          }
-
-
-def get_ports(_, vm):
-    ports = []
-    for p in vm.ports:
-        port = {"name": p.name, "address": None, "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
-        try:
-            port["address"] = p.address
-        except UnknownException:
-            pass
-        ports.append(port)
-
-    return ports
+    @staticmethod
+    def get_auth_url(exporter, resource):
+        return resource.provider.connection_url
 
 
 @resource("openstack::Host", agent="provider.name", id_attribute="name")
-class Host(Resource):
+class Host(OpenstackResource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
-    fields = OS_FIELDS + ["name", "flavor", "image", "key_name", "user_data", "key_value", "ports",
-                          "security_groups"]
-    map = {"key_name": get_key_name,
-           "key_value": get_key_value,
-           "user_data": get_user_data,
-           "ports": get_ports,
-           "security_groups": lambda _, vm: [x.name for x in vm.security_groups],
-           }
-    map.update(OS_MAP)
+    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups")
 
+    @staticmethod
+    def get_key_name(exporter, vm):
+        return vm.key_pair.name
 
-def get_gateway(exporter, router):
-    if hasattr(router.ext_gateway, "name"):
-        return router.ext_gateway.name
+    @staticmethod
+    def get_key_value(exporter, vm):
+        return vm.key_pair.public_key
 
-    return ""
+    @staticmethod
+    def get_user_data(exporter, vm):
+        """
+            Return an empty string when the user_data value is unknown
+            TODO: this is a hack
+        """
+        try:
+            ua = vm.user_data
+        except UnknownException:
+            ua = ""
+        return ua
+
+    @staticmethod
+    def get_ports(_, vm):
+        ports = []
+        for p in vm.ports:
+            port = {"name": p.name, "address": None, "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
+            try:
+                port["address"] = p.address
+            except UnknownException:
+                pass
+            ports.append(port)
+
+        return ports
+
+    @staticmethod
+    def get_security_groups(_, vm):
+        return [v.name for v in vm.security_groups]
 
 
 @resource("openstack::Network", agent="provider.name", id_attribute="name")
-class Network(Resource):
+class Network(OpenstackResource):
     """
         This class represents a network in neutron
     """
-    fields = ("name", "external", "physical_network", "network_type", "segmentation_id",
-              "project", "purged", "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"project": lambda x, y: y.project.name,
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "external", "physical_network", "network_type", "segmentation_id")
 
 
 @resource("openstack::Subnet", agent="provider.name", id_attribute="name")
-class Subnet(Resource):
+class Subnet(OpenstackResource):
     """
         This class represent a subnet in neutron
     """
-    fields = ("name", "project", "purged", "network_address", "dhcp", "allocation_start",
-              "allocation_end", "network", "admin_user", "admin_password", "admin_tenant",
-              "auth_url")
-    map = {"network": lambda x, y: y.network.name,
-           "project": lambda x, y: y.project.name,
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network")
 
-
-def get_routes(_, router):
-    routes = {route.destination: route.nexthop for route in router.routes}
-    return routes
+    @staticmethod
+    def get_network(_, subnet):
+        return subnet.network.name
 
 
 @resource("openstack::Router", agent="provider.name", id_attribute="name")
-class Router(Resource):
+class Router(OpenstackResource):
     """
         This class represent a router in neutron
     """
-    fields = ("name", "project", "subnets", "purged", "admin_user", "admin_password",
-              "admin_tenant", "auth_url", "gateway", "ports", "routes")
-    map = {"subnets": lambda x, y: sorted([subnet.name for subnet in y.subnets]),
-           "ports": lambda x, y: [p.name for p in y.ports],
-           "routes": get_routes,
-           "gateway": get_gateway,
-           "project": lambda x, y: y.project.name,
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "subnets", "gateway", "ports", "routes")
+
+    @staticmethod
+    def get_gateway(_, router):
+        if hasattr(router.ext_gateway, "name"):
+            return router.ext_gateway.name
+
+        return ""
+
+    @staticmethod
+    def get_routes(_, router):
+        routes = {route.destination: route.nexthop for route in router.routes}
+        return routes
+
+    @staticmethod
+    def get_subnets(_, router):
+        return sorted([subnet.name for subnet in router.subnets])
+
+    @staticmethod
+    def get_ports(_, router):
+        return [p.name for p in router.ports]
 
 
 @resource("openstack::RouterPort", agent="provider.name", id_attribute="name")
-class RouterPort(Resource):
+class RouterPort(OpenstackResource):
     """
         A port in a router
     """
-    fields = ("name", "purged", "admin_user", "admin_password", "admin_tenant", "auth_url", "address", "project",
-              "subnet", "router", "network")
-    map = {"subnet": lambda x, y: y.subnet.name,
-           "network": lambda x, y: y.subnet.network.name,
-           "router": lambda x, y: y.router.name,
-           "project": lambda x, y: y.project.name,
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "address", "subnet", "router", "network")
 
+    @staticmethod
+    def get_subnet(_, port):
+        return port.subnet.name
 
-def get_port_address(exporter, port):
-    try:
-        return port.address
-    except UnknownException:
-        return ""
+    @staticmethod
+    def get_network(_, port):
+        return port.subnet.network.name
+
+    @staticmethod
+    def get_router(_, port):
+        return port.router.name
 
 
 @resource("openstack::HostPort", agent="provider.name", id_attribute="name")
-class HostPort(Resource):
+class HostPort(OpenstackResource):
     """
         A port in a router
     """
-    fields = ("name", "purged", "admin_user", "admin_password", "admin_tenant", "auth_url", "address", "project",
-              "subnet", "host", "network", "portsecurity", "dhcp", "port_index")
-    map = {"address": get_port_address,
-           "subnet": lambda x, y: y.subnet.name,
-           "network": lambda x, y: y.subnet.network.name,
-           "host": lambda x, y: y.host.name,
-           "project": lambda x, y: y.project.name,
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "address", "subnet", "host", "network", "portsecurity", "dhcp", "port_index")
 
-
-def security_rules_to_json(exporter, group):
-    rules = []
-    for rule in group.rules:
-        json_rule = {"protocol": rule.ip_protocol,
-                     "direction": rule.direction}
-
-        if rule.port > 0:
-            json_rule["port_range_min"] = rule.port
-            json_rule["port_range_max"] = rule.port
-
-        else:
-            json_rule["port_range_min"] = rule.port
-            json_rule["port_range_max"] = rule.port
-
-        if json_rule["port_range_min"] == 0:
-            json_rule["port_range_min"] = None
-
-        if json_rule["port_range_max"] == 0:
-            json_rule["port_range_max"] = None
-
+    @staticmethod
+    def get_address(exporter, port):
         try:
-            json_rule["remote_ip_prefix"] = rule.remote_prefix
-        except Exception:
-            pass
+            return port.address
+        except UnknownException:
+            return ""
 
-        try:
-            json_rule["remote_group"] = rule.remote_group.name
-        except Exception:
-            pass
+    @staticmethod
+    def get_subnet(_, port):
+        return port.subnet.name
 
-        rules.append(json_rule)
-    return rules
+    @staticmethod
+    def get_network(_, port):
+        return port.subnet.network.name
+
+    @staticmethod
+    def get_host(_, port):
+        return port.host.name
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
-class SecurityGroup(Resource):
+class SecurityGroup(OpenstackResource):
     """
         A security group in an OpenStack tenant
     """
-    fields = OS_FIELDS + ["name", "description", "manage_all", "rules"]
-    map = {"rules": security_rules_to_json}
-    map.update(OS_MAP.copy())
+    fields = ("name", "description", "manage_all", "rules")
+
+    @staticmethod
+    def get_rules(exporter, group):
+        rules = []
+        for rule in group.rules:
+            json_rule = {"protocol": rule.ip_protocol,
+                         "direction": rule.direction}
+
+            if rule.port > 0:
+                json_rule["port_range_min"] = rule.port
+                json_rule["port_range_max"] = rule.port
+
+            else:
+                json_rule["port_range_min"] = rule.port
+                json_rule["port_range_max"] = rule.port
+
+            if json_rule["port_range_min"] == 0:
+                json_rule["port_range_min"] = None
+
+            if json_rule["port_range_max"] == 0:
+                json_rule["port_range_max"] = None
+
+            try:
+                json_rule["remote_ip_prefix"] = rule.remote_prefix
+            except Exception:
+                pass
+
+            try:
+                json_rule["remote_group"] = rule.remote_group.name
+            except Exception:
+                pass
+
+            rules.append(json_rule)
+        return rules
 
 
 @resource("openstack::FloatingIP", agent="provider.name", id_attribute="name")
-class FloatingIP(Resource):
+class FloatingIP(OpenstackResource):
     """
         A floating ip
     """
-    fields = OS_FIELDS + ["name", "port", "external_network"]
-    map = {"port": lambda _, x: x.port.name,
-           "external_network": lambda _, x: x.external_network.name,
-           }
-    map.update(OS_MAP.copy())
+    fields = ("name", "port", "external_network")
+
+    @staticmethod
+    def get_port(_, fip):
+        return fip.port.name
+
+    @staticmethod
+    def get_external_network(_, fip):
+        return fip.external_network.name
+
+
+class KeystoneResource(PurgeableResource):
+    fields = ("admin_token", "url")
+
+    @staticmethod
+    def get_admin_token(_, resource):
+        return resource.provider.token
+
+    @staticmethod
+    def get_url(_, resource):
+        return os.path.join(resource.provider.admin_url, "v2.0/"),
 
 
 @resource("openstack::Project", agent="provider.name", id_attribute="name")
-class Project(Resource):
+class Project(KeystoneResource):
     """
         This class represents a project in keystone
     """
-    fields = ("name", "enabled", "description", "admin_token", "url", "purged",
-              "admin_user", "admin_password", "admin_tenant", "auth_url", "manage")
+    fields = ("name", "enabled", "description", "manage", "admin_user", "admin_password", "admin_tenant", "auth_url")
 
-    map = {"admin_token": lambda x, y: y.provider.token,
-           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    @staticmethod
+    def get_project(exporter, resource):
+        return resource.project.name
+
+    @staticmethod
+    def get_admin_user(exporter, resource):
+        return resource.provider.username
+
+    @staticmethod
+    def get_admin_password(exporter, resource):
+        return resource.provider.password
+
+    @staticmethod
+    def get_admin_tenant(exporter, resource):
+        return resource.provider.tenant
+
+    @staticmethod
+    def get_auth_url(exporter, resource):
+        return resource.provider.connection_url
 
 
 @resource("openstack::User", agent="provider.name", id_attribute="name")
-class User(Resource):
+class User(KeystoneResource, OpenstackResource):
     """
         A user in keystone
     """
-    fields = ("name", "email", "enabled", "password", "admin_token", "url", "purged",
-              "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"admin_token": lambda x, y: y.provider.token,
-           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "email", "enabled", "password")
 
 
 @resource("openstack::Role", agent="provider.name", id_attribute="role_id")
-class Role(Resource):
+class Role(KeystoneResource, OpenstackResource):
     """
         A role that adds a user to a project
     """
-    fields = ("role_id", "role", "project", "user", "admin_token", "url", "purged",
-              "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"project": lambda x, obj: obj.project.name,
-           "user": lambda x, obj: obj.user.name,
-           "admin_token": lambda x, y: y.provider.token,
-           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("role_id", "role", "project", "user")
 
 
 @resource("openstack::Service", agent="provider.name", id_attribute="name")
-class Service(Resource):
+class Service(KeystoneResource, OpenstackResource):
     """
         A service for which endpoints can be registered
     """
-    fields = ("name", "type", "description", "admin_token", "url", "purged",
-              "admin_user", "admin_password", "admin_tenant", "auth_url")
-    map = {"admin_token": lambda x, y: y.provider.token,
-           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("name", "type", "description")
 
 
 @resource("openstack::EndPoint", agent="provider.name", id_attribute="service_id")
-class EndPoint(Resource):
+class EndPoint(KeystoneResource, OpenstackResource):
     """
         An endpoint for a service
     """
-    fields = ("region", "internal_url", "public_url", "admin_url", "service_id", "admin_token",
-              "url", "purged", "admin_user", "admin_password", "admin_tenant",
-              "auth_url")
-    map = {"admin_token": lambda x, y: y.provider.token,
-           "url": lambda x, y: os.path.join(y.provider.admin_url, "v2.0/"),
-           "admin_user": lambda x, y: y.provider.username,
-           "admin_password": lambda x, y: y.provider.password,
-           "admin_tenant": lambda x, y: y.provider.tenant,
-           "auth_url": lambda x, y: y.provider.connection_url}
+    fields = ("region", "internal_url", "public_url", "admin_url", "service_id")
+
+
+@dependency_manager
+def openstack_dependencies(config_model, resource_model):
+    projects = {}
+    networks = {}
+    routers = {}
+    subnets = {}
+    vms = {}
+    ports = {}
+    fips = {}
+
+    for _, resource in resource_model.items():
+        if resource.id.entity_type == "openstack::Project":
+            projects[resource.name] = resource
+
+        elif resource.id.entity_type == "openstack::Network":
+            networks[resource.name] = resource
+
+        elif resource.id.entity_type == "openstack::Router":
+            routers[resource.name] = resource
+
+        elif resource.id.entity_type == "openstack::Subnet":
+            subnets[resource.name] = resource
+
+        elif resource.id.entity_type == "openstack::Host":
+            vms[resource.name] = resource
+
+        elif resource.id.entity_type == "openstack::HostPort":
+            ports[resource.name] = resource
+
+        elif resource.id.entity_type == "openstack::FloatingIP":
+            fips[resource.name] = resource
+
+    # they require the tenant to exist
+    for network in networks.values():
+        network.requires.add(projects[network.model.project.name])
+
+    for router in routers.values():
+        router.requires.add(projects[router.model.project.name])
+
+        # depend on the attached subnets
+        for subnet_name in router.subnets:
+            router.requires.add(subnets[subnet_name])
+
+    for subnet in subnets.values():
+        subnet.requires.add(projects[subnet.model.project.name])
+
+        # also require the network it is attached to
+        subnet.requires.add(networks[subnet.model.network.name])
+
+    for vm in vms.values():
+        vm.requires.add(projects[vm.model.project.name])
+
+        for port in vm.ports:
+            vm.requires.add(subnets[port["network"]])
+
+    for port in ports.values():
+        port.requires.add(projects[port.model.project.name])
+        port.requires.add(subnets[port.network])
+        port.requires.add(vms[port.host])
+
+    for fip in fips.values():
+        fip.requires.add(networks[fip.external_network])
+        fip.requires.add(ports[fip.port])
+
+
+CRED_TIMEOUT=600
+RESOURCE_TIMEOUT=10
+
+
+class OpenStackHandler(CRUDHandler):
+
+    @cache(timeout=CRED_TIMEOUT)
+    def get_session(self, auth_url, project, admin_user, admin_password):
+        auth = v2.Password(auth_url=auth_url, username=admin_user, password=admin_password, tenant_name=project)
+        sess = session.Session(auth=auth)
+        return sess
+
+    @cache(timeout=CRED_TIMEOUT)
+    def get_nova_client(self, auth_url, project, admin_user, admin_password):
+        return nova_client.Client("2", session=self.get_session(auth_url, project, admin_user, admin_password))
+
+    @cache(timeout=CRED_TIMEOUT)
+    def get_neutron_client(self, auth_url, project, admin_user, admin_password):
+        return neutron_client.Client("2.0", session=self.get_session(auth_url, project, admin_user, admin_password))
+
+    @cache(timeout=CRED_TIMEOUT)
+    def get_keystone_client(self, auth_url, project, admin_user, admin_password):
+        return keystone_client.Client(session=self.get_session(auth_url, project, admin_user, admin_password))
+
+    def get_keystone(self, resource):
+        return self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+
+    def pre(self, resource):
+        self._nova = self.get_nova_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+        self._neutron = self.get_neutron_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+        self._keystone = self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+
+    def post(self, resource):
+        self._nova = None
+        self._neutron = None
+        self._keystone = None
+
+    @cache(ignore=["resource"])
+    def get_project_id(self, resource, name):
+        """
+            Retrieve the id of a project based on the given name
+        """
+        # Fallback for non admin users
+        if resource.admin_tenant == name:
+            session = self.get_session(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+            return session.get_project_id()
+
+        try:
+            tenant = self.get_keystone(resource).tenants.find(name=name)
+            return tenant.id
+        except Exception:
+            return None
+
+    def get_network_id(self, project_id, name):
+        """
+            Retrieve the network id based on the name of the network
+        """
+        if project_id is not None:
+            networks = self._neutron.list_networks(tenant_id=project_id, name=name)
+        else:
+            networks = self._neutron.list_networks(name=name)
+
+        if len(networks["networks"]) == 0:
+            return None
+
+        elif len(networks["networks"]) > 1:
+            raise Exception("Found more than one network with name %s for project %s" % (name, project_id))
+
+        else:
+            return networks["networks"][0]["id"]
+
+    def get_subnet_id(self, project_id, name):
+        """
+            Retrieve the subnet id based on the name of the network
+        """
+        subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
+
+        if len(subnets["subnets"]) == 0:
+            return None
+
+        elif len(subnets["subnets"]) > 1:
+            raise Exception("Found more than one subnet with name %s for project %s" % (name, project_id))
+
+        else:
+            return subnets["subnets"][0]["id"]
+
+    def get_router_id(self, project_id, name):
+        """
+            Retrieve the router id based on the name of the network
+        """
+        routers = self._neutron.list_routers(name=name)
+
+        if len(routers["routers"]) == 0:
+            return None
+
+        elif len(routers["routers"]) > 1:
+            raise Exception("Found more than one router with name %s for project %s" % (name, project_id))
+
+        else:
+            return routers["routers"][0]["id"]
+
+    def get_host_id(self, project_id, name):
+        return self.get_host(project_id, name).id
+
+    def get_host(self, project_id, name):
+        """
+            Retrieve the router id based on the name of the network
+        """
+        vms = self._nova.servers.findall(name=name)
+
+        if len(vms) == 0:
+            return None
+
+        elif len(vms) > 1:
+            raise Exception("Found more than one VM with name %s for project %s" % (name, project_id))
+
+        else:
+            return vms[0]
+
+    def get_host_for_id(self, id):
+        """
+            Retrieve the router id based on the name of the network
+        """
+        vms = self._nova.servers.findall(id=id)
+
+        if len(vms) == 0:
+            return None
+
+        elif len(vms) > 1:
+            raise Exception("Found more than one VM with id %s" % (id))
+
+        else:
+            return vms[0]
 
 
 @provider("openstack::Host", name="openstack")
@@ -361,7 +560,6 @@ class VMHandler(ResourceHandler):
         This class handles managing openstack resources
     """
     __connections = {}
-# OS_FIELDS = ["project", "admin_user", "admin_password", "admin_tenant", "auth_url", "purged", "purge_on_delete"]
 
     def pre(self, resource):
         """
@@ -506,10 +704,10 @@ class VMHandler(ResourceHandler):
             desired = set(changes["security_groups"][1])
 
             server = self._client.servers.find(name=resource.name)
-            for new_rule in (desired-current):
+            for new_rule in (desired - current):
                 self._client.servers.add_security_group(server, new_rule)
 
-            for remove_rule in (current-desired):
+            for remove_rule in (current - desired):
                 self._client.servers.remove_security_group(server, remove_rule)
 
         return True
@@ -542,71 +740,6 @@ class VMHandler(ResourceHandler):
             return facts
         except Exception:
             return {}
-
-
-@dependency_manager
-def openstack_dependencies(config_model, resource_model):
-    projects = {}
-    networks = {}
-    routers = {}
-    subnets = {}
-    vms = {}
-    ports = {}
-    fips = {}
-
-    for _, resource in resource_model.items():
-        if resource.id.entity_type == "openstack::Project":
-            projects[resource.name] = resource
-
-        elif resource.id.entity_type == "openstack::Network":
-            networks[resource.name] = resource
-
-        elif resource.id.entity_type == "openstack::Router":
-            routers[resource.name] = resource
-
-        elif resource.id.entity_type == "openstack::Subnet":
-            subnets[resource.name] = resource
-
-        elif resource.id.entity_type == "openstack::Host":
-            vms[resource.name] = resource
-
-        elif resource.id.entity_type == "openstack::HostPort":
-            ports[resource.name] = resource
-
-        elif resource.id.entity_type == "openstack::FloatingIP":
-            fips[resource.name] = resource
-
-    # they require the tenant to exist
-    for network in networks.values():
-        network.requires.add(projects[network.model.project.name])
-
-    for router in routers.values():
-        router.requires.add(projects[router.model.project.name])
-
-        # depend on the attached subnets
-        for subnet_name in router.subnets:
-            router.requires.add(subnets[subnet_name])
-
-    for subnet in subnets.values():
-        subnet.requires.add(projects[subnet.model.project.name])
-
-        # also require the network it is attached to
-        subnet.requires.add(networks[subnet.model.network.name])
-
-    for vm in vms.values():
-        vm.requires.add(projects[vm.model.project.name])
-
-        for port in vm.ports:
-            vm.requires.add(subnets[port["network"]])
-
-    for port in ports.values():
-        port.requires.add(projects[port.model.project.name])
-        port.requires.add(subnets[port.network])
-        port.requires.add(vms[port.host])
-
-    for fip in fips.values():
-        fip.requires.add(networks[fip.external_network])
-        fip.requires.add(ports[fip.port])
 
 
 class NeutronHandler(ResourceHandler):
@@ -773,35 +906,29 @@ class NeutronHandler(ResourceHandler):
 
 
 @provider("openstack::Network", name="openstack")
-class NetworkHandler(NeutronHandler):
+class NetworkHandler(OpenStackHandler):
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        network = self.facts(resource)
 
-    def check_resource(self, resource):
-        """
-            Check the state of the resource
-        """
-        current = resource.clone()
-        neutron_version = self.facts(resource)
-
-        if len(neutron_version) > 0:
-            current.external = neutron_version["router:external"]
+        if len(network) > 0:
+            resource.external = network["router:external"]
             if resource.physical_network != "":
-                current.physical_network = neutron_version["provider:physical_network"]
+                resource.physical_network = network["provider:physical_network"]
 
             if resource.network_type != "":
-                current.network_type = neutron_version["provider:network_type"]
+                resource.network_type = network["provider:network_type"]
 
             if resource.segmentation_id > 0:
-                current.segmentation_id = neutron_version["provider:segmentation_id"]
+                resource.segmentation_id = network["provider:segmentation_id"]
+
+            ctx.set("network_id", network["id"])
+            ctx.set("project_id", network["tenant_id"])
 
         else:
-            current.purged = True
-
-        return current
+            raise ResourcePurged()
 
     def _create_dict(self, resource: Network, project_id):
-        net = {"name": resource.name,
-               "tenant_id": project_id,
-               "admin_state_up": True}
+        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True}
 
         if resource.physical_network != "":
             net["provider:physical_network"] = resource.physical_network
@@ -814,54 +941,35 @@ class NetworkHandler(NeutronHandler):
 
         return net
 
-    def do_changes(self, resource: Network) -> bool:
-        """
-            Enforce the changes
-        """
-        changes = self.list_changes(resource)
-
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         project_id = self.get_project_id(resource, resource.project)
-        if project_id is None:
-            raise SkipResource("Cannot create network when project id is not yet known.")
+        self._neutron.create_network({"network": self._create_dict(resource, project_id)})
+        ctx.set_created()
 
-        network_id = self.get_network_id(project_id, resource.name)
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        network_id = ctx.get("id")
+        self._neutron.delete_network(network_id)
+        ctx.set_purged()
 
-        changed = False
-        if "purged" in changes:
-            if changes["purged"][1] == False:  # create the network
-                self._client.create_network({"network": self._create_dict(resource, project_id)})
-                changed = True
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
+        network_id = ctx.get("id")
+        project_id = ctx.get("project_id")
+        self._neutron.update_network(network_id, {"network": {"name": resource.name, "router:external": resource.external}})
 
-            elif changes["purged"][1] and not changes["purged"][0]:
-                self._client.delete_network(network_id)
-                changed = True
-
-        elif len(changes) > 0:
-            self._client.update_network(network_id, {"network": {"name": resource.name, "router:external": resource.external}})
-            changed = True
-
-        return changed
+        ctx.fields_updated(("name", "external"))
+        ctx.set_updated()
 
     def facts(self, resource: Network):
-        """
-            Get facts about this resource
-        """
-        networks = self._client.list_networks(name=resource.name)
+        networks = self._neutron.list_networks(name=resource.name)["networks"]
 
-        if "networks" not in networks:
+        if len(networks) == 0:
             return {}
 
-        filtered_list = [net for net in networks["networks"] if net["name"] == resource.name]
-
-        if len(filtered_list) == 0:
-            return {}
-
-        if len(filtered_list) > 1:
+        if len(networks) > 1:
             LOGGER.warning("Multiple networks with the same name available!")
             return {}
 
-        network = filtered_list[0]
-        return network
+        return networks[0]
 
 
 @provider("openstack::Router", name="openstack")
