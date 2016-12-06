@@ -1,10 +1,5 @@
 author: Inmanta <code@inmanta.com>
 license: Apache 2.0
 name: openstack
-version: 0.6.2
-requires:
-- ip
-- mysql
-- rabbitmq
-- std
-- vm
+version: 1.0.0
+compiler_version: 2016.5
