@@ -283,7 +283,7 @@ class FloatingIP(OpenstackResource):
 
 
 class KeystoneResource(PurgeableResource):
-    fields = ("admin_token", "url")
+    fields = ("admin_token", "url", "admin_user", "admin_password", "admin_tenant", "auth_url")
 
     @staticmethod
     def get_admin_token(_, resource):
@@ -292,18 +292,6 @@ class KeystoneResource(PurgeableResource):
     @staticmethod
     def get_url(_, resource):
         return os.path.join(resource.provider.admin_url, "v2.0/"),
-
-
-@resource("openstack::Project", agent="provider.name", id_attribute="name")
-class Project(KeystoneResource):
-    """
-        This class represents a project in keystone
-    """
-    fields = ("name", "enabled", "description", "manage", "admin_user", "admin_password", "admin_tenant", "auth_url")
-
-    @staticmethod
-    def get_project(exporter, resource):
-        return resource.project.name
 
     @staticmethod
     def get_admin_user(exporter, resource):
@@ -322,8 +310,20 @@ class Project(KeystoneResource):
         return resource.provider.connection_url
 
 
+@resource("openstack::Project", agent="provider.name", id_attribute="name")
+class Project(KeystoneResource):
+    """
+        This class represents a project in keystone
+    """
+    fields = ("name", "enabled", "description", "manage")
+
+    @staticmethod
+    def get_project(exporter, resource):
+        return resource.project.name
+
+
 @resource("openstack::User", agent="provider.name", id_attribute="name")
-class User(KeystoneResource, OpenstackResource):
+class User(KeystoneResource):
     """
         A user in keystone
     """
@@ -331,15 +331,23 @@ class User(KeystoneResource, OpenstackResource):
 
 
 @resource("openstack::Role", agent="provider.name", id_attribute="role_id")
-class Role(KeystoneResource, OpenstackResource):
+class Role(KeystoneResource):
     """
         A role that adds a user to a project
     """
-    fields = ("role_id", "role", "project", "user")
+    fields = ("role_id", "role", "project", "user", "project")
+
+    @staticmethod
+    def get_project(exporter, resource):
+        return resource.project.name
+
+    @staticmethod
+    def get_user(exporter, resource):
+        return resource.user.name
 
 
 @resource("openstack::Service", agent="provider.name", id_attribute="name")
-class Service(KeystoneResource, OpenstackResource):
+class Service(KeystoneResource):
     """
         A service for which endpoints can be registered
     """
@@ -347,7 +355,7 @@ class Service(KeystoneResource, OpenstackResource):
 
 
 @resource("openstack::EndPoint", agent="provider.name", id_attribute="service_id")
-class EndPoint(KeystoneResource, OpenstackResource):
+class EndPoint(KeystoneResource):
     """
         An endpoint for a service
     """
