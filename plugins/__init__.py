@@ -20,18 +20,23 @@ import os
 import logging
 
 from inmanta.execute.proxy import UnknownException
-from inmanta.resources import resource, PurgeableResource
+from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources
 from inmanta.agent import handler
 from inmanta.agent.handler import provider, SkipResource, cache, ResourceHandler, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
+
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
+from neutronclient import neutron
+
 from novaclient import client as nova_client
 import novaclient.exceptions
-from keystoneclient.auth.identity import v2
+
+from keystoneauth1.identity import v3
 from keystoneauth1 import session
-from keystoneclient.v2_0 import client as keystone_client
+from keystoneclient.v3 import client as keystone_client
+
 try:
     from keystoneclient.exceptions import NotFound
 except ImportError:
@@ -47,7 +52,7 @@ NULL_UUID = "00000000-0000-0000-0000-000000000000"
 NULL_ID = "00000000000000000000000000000000"
 
 
-class OpenstackResource(PurgeableResource):
+class OpenstackResource(PurgeableResource, ManagedResource):
     fields = ("project", "admin_user", "admin_password", "admin_tenant", "auth_url")
 
     @staticmethod
@@ -278,7 +283,7 @@ class KeystoneResource(PurgeableResource):
 
     @staticmethod
     def get_url(_, resource):
-        return os.path.join(resource.provider.admin_url, "v2.0/"),
+        return os.path.join(resource.provider.admin_url, "v2.0/")
 
     @staticmethod
     def get_admin_user(exporter, resource):
@@ -383,10 +388,12 @@ def openstack_dependencies(config_model, resource_model):
 
     # they require the tenant to exist
     for network in networks.values():
-        network.requires.add(projects[network.model.project.name])
+        if network.model.project.name in projects:
+            network.requires.add(projects[network.model.project.name])
 
     for router in routers.values():
-        router.requires.add(projects[router.model.project.name])
+        if router.model.project.name in projects:
+            router.requires.add(projects[router.model.project.name])
 
         # depend on the attached subnets
         for subnet_name in router.subnets:
@@ -422,7 +429,8 @@ class OpenStackHandler(CRUDHandler):
 
     @cache(timeout=CRED_TIMEOUT)
     def get_session(self, auth_url, project, admin_user, admin_password):
-        auth = v2.Password(auth_url=auth_url, username=admin_user, password=admin_password, tenant_name=project)
+        auth = v3.Password(auth_url=auth_url, username=admin_user, password=admin_password, project_name=project,
+                           user_domain_id="default", project_domain_id="default")
         sess = session.Session(auth=auth)
         return sess
 
@@ -441,19 +449,18 @@ class OpenStackHandler(CRUDHandler):
     def get_keystone(self, resource):
         return self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
 
-    def pre(self, resource):
-        self._nova = self.get_nova_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
-        self._neutron = self.get_neutron_client(resource.auth_url, resource.project, resource.admin_user,
+    def pre(self, ctx, resource):
+        project = resource.admin_tenant
+        self._nova = self.get_nova_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
+        self._neutron = self.get_neutron_client(resource.auth_url, project, resource.admin_user,
                                                 resource.admin_password)
-        self._keystone = self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user,
-                                                  resource.admin_password)
+        self._keystone = self.get_keystone_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
 
-    def post(self, resource):
+    def post(self, ctx, resource):
         self._nova = None
         self._neutron = None
         self._keystone = None
 
-    @cache(ignore=["resource"])
     def get_project_id(self, resource, name):
         """
             Retrieve the id of a project based on the given name
@@ -738,13 +745,6 @@ class NeutronHandler(ResourceHandler):
     def is_available(cls, io):
         return True
 
-    def list_changes(self, resource):
-        """
-            List the changes that are required to the vm
-        """
-        current = self.check_resource(resource)
-        return self._diff(current, resource)
-
     def _diff(self, current, desired):
         changes = {}
 
@@ -894,9 +894,10 @@ class NeutronHandler(ResourceHandler):
 @provider("openstack::Network", name="openstack")
 class NetworkHandler(OpenStackHandler):
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        network = self.facts(resource)
+        network = self.facts(ctx, resource)
 
         if len(network) > 0:
+            resource.purged = False
             resource.external = network["router:external"]
             if resource.physical_network != "":
                 resource.physical_network = network["provider:physical_network"]
@@ -933,19 +934,22 @@ class NetworkHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        network_id = ctx.get("id")
+        network_id = ctx.get("network_id")
         self._neutron.delete_network(network_id)
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
-        network_id = ctx.get("id")
+        network_id = ctx.get("network_id")
         self._neutron.update_network(network_id, {"network": {"name": resource.name, "router:external": resource.external}})
 
         ctx.fields_updated(("name", "external"))
         ctx.set_updated()
 
-    def facts(self, resource: Network):
-        networks = self._neutron.list_networks(name=resource.name)["networks"]
+    def facts(self, ctx, resource: Network):
+        try:
+            networks = self._neutron.list_networks(name=resource.name)["networks"]
+        except NotFound:
+            return {}
 
         if len(networks) == 0:
             return {}
@@ -1697,99 +1701,32 @@ def keystone_dependencies(config_model, resource_model):
         role.requires.add(users[role.user])
 
 
-class KeystoneHandler(ResourceHandler):
-    __connections = {}
-    """
-        Holds common routines for all keystone handlers
-    """
-    def get_connection(self, resource):
-        """
-            Get an active connection to keystone
-        """
-        token = resource.admin_token
-        endpoint = resource.url
-        if resource.admin_token != "":
-            if (endpoint, token) in KeystoneHandler.__connections:
-                return KeystoneHandler.__connections[(endpoint, token)]
-
-            conn = keystone_client.Client(endpoint=endpoint, token=token)
-            KeystoneHandler.__connections[(endpoint, token)] = conn
-            return conn
-
-        else:
-            auth = v2.Password(auth_url=resource.auth_url, username=resource.admin_user,
-                               password=resource.admin_password, tenant_name=resource.admin_tenant)
-            sess = session.Session(auth=auth)
-            kc = keystone_client.Client(session=sess)
-            return kc
-
-
 @provider("openstack::Project", name="openstack")
-class ProjectHandler(KeystoneHandler):
-    def check_resource(self, resource):
-        """
-            Check the state of the resource
-        """
-        current = resource.clone()
-
-        keystone = self.get_connection(resource)
-
+class ProjectHandler(OpenStackHandler):
+    def read_resource(self, ctx, resource):
         try:
-            project = keystone.tenants.find(name=resource.name)
-
-            current.enabled = project.enabled
-            current.description = project.description
-
+            project = self._keystone.projects.find(name=resource.name)
+            resource.purged = False
+            resource.enabled = project.enabled
+            resource.description = project.description
+            ctx.set("project", project)
         except NotFound:
-            current.purged = True
-            current.enabled = False
-            current.description = ""
-            current.name = ""
+            raise ResourcePurged()
 
-            project = keystone
+    def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        self._keystone.projects.create(resource.name, description=resource.description, enabled=resource.enabled,
+                                       domain="default")
+        ctx.set_created()
 
-        return project, current
+    def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        ctx.get("project").delete()
+        ctx.set_purged()
 
-    def _list_changes(self, resource):
-        """
-            List the changes that are required to the vm
-        """
-        project, current = self.check_resource(resource)
-        return project, self._diff(current, resource)
+    def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
+        ctx.get("project").update(name=resource.name, description=resource.description, enabled=resource.enabled)
+        ctx.set_updated()
 
-    def list_changes(self, resource):
-        _, changes = self._list_changes(resource)
-        return changes
-
-    def do_changes(self, resource: Project) -> bool:
-        """
-            Enforce the changes
-        """
-        if not resource.manage:
-            return True
-
-        project, changes = self._list_changes(resource)
-
-        changed = False
-        if "purged" in changes:
-            if not changes["purged"][1]:  # create the project
-                project.tenants.create(resource.name, description=resource.description, enabled=resource.enabled)
-                changed = True
-
-            elif changes["purged"][1] and not changes["purged"][0]:
-                project.delete()
-                changed = True
-
-        elif len(changes) > 0:
-            project.update(name=resource.name, description=resource.description, enabled=resource.enabled)
-            changed = True
-
-        return changed
-
-    def facts(self, resource: Project):
-        """
-            Get facts about this resource
-        """
+    def facts(self, ctx, resource: Project):
         keystone = self.get_connection(resource)
         try:
             project = keystone.tenants.find(name=resource.name)
@@ -1799,220 +1736,170 @@ class ProjectHandler(KeystoneHandler):
 
 
 @provider("openstack::User", name="openstack")
-class UserHandler(KeystoneHandler):
-    def check_resource(self, ctx, resource):
-        """
-            Check the state of the resource
-        """
-        current = resource.clone()
-
-        keystone = self.get_connection(resource)
-        ctx.set("keystone", keystone)
-
+class UserHandler(OpenStackHandler):
+    def read_resource(self, ctx, resource):
         try:
-            user = keystone.users.find(name=resource.name)
-            current.enabled = user.enabled
-            current.email = user.email
+            user = self._keystone.users.find(name=resource.name)
+            resource.purged = False
+            resource.enabled = user.enabled
+            resource.email = user.email
             ctx.set("user", user)
+
+            # if a password is provided (not ""), check if it works otherwise mark it as "***"
+            if resource.password != "":
+                try:
+                    s = keystone_client.Client(auth_url=resource.auth_url, username=resource.name, password=resource.password)
+                    s.authenticate()
+                except Exception:
+                    resource.password = "***"
+
         except NotFound:
-            current.purged = True
-            current.enabled = None
-            current.email = None
-            current.name = None
+            raise ResourcePurged()
 
-        # if a password is provided (not ""), check if it works otherwise mark it as "***"
+    def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        self._keystone.users.create(resource.name, password=resource.password, email=resource.email, enabled=resource.enabled)
+        ctx.set_created()
+
+    def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        ctx.get("user").delete()
+        ctx.set_purged()
+
+    def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
+        user_id = ctx.get("user").id
         if resource.password != "":
-            try:
-                keystone_client.Client(auth_url=resource.auth_url, username=resource.name, password=resource.password)
-            except Exception:
-                current.password = "***"
-
-        return current
-
-    def do_changes(self, ctx, resource, changes):
-        """
-            Enforce the changes
-        """
-        keystone = ctx.get("keystone")
-        user = ctx.get("user") if ctx.contains("user") else None
-        if "purged" in changes:
-            if not changes["purged"]["desired"]:  # create a new user
-                keystone.users.create(resource.name, resource.password, email=resource.email, enabled=resource.enabled)
-                ctx.set_created()
-
-            else:
-                user.delete()
-                ctx.set_purged()
-
-        elif len(changes) > 0:
-            user.manager.update(user, email=resource.email, enabled=resource.enabled)
-            if "password" in changes:
-                user.manager.update_password(user, resource.password)
-
-            ctx.set_updated()
+            self._keystone.users.update(user_id, password=resource.password, email=resource.email, enabled=resource.enabled)
+        else:
+            self._keystone.users.update(user_id, email=resource.email, enabled=resource.enabled)
+        ctx.set_updated()
 
 
 @provider("openstack::Role", name="openstack")
-class RoleHandler(KeystoneHandler):
-    def check_resource(self, ctx, resource):
-        """
-            Check the state of the resource
-        """
-        current = resource.clone()
-
-        keystone = self.get_connection(resource)
-
+class RoleHandler(OpenStackHandler):
+    """ creates roles and user, project, role assocations """
+    def read_resource(self, ctx, resource):
         # get the role
         role = None
         try:
-            role = keystone.roles.find(name=resource.role)
+            self._keystone.users.find(name="bartvb")
+            role = self._keystone.roles.find(name=resource.role)
         except NotFound:
             pass
 
         try:
-            user = keystone.users.find(name=resource.user)
-            project = keystone.tenants.find(name=resource.project)
+            user = self._keystone.users.find(name=resource.user)
+            project = self._keystone.projects.find(name=resource.project)
         except NotFound:
-            # we assume the role does not exist yet and should be created
-            current.purged = True
-            return None, None, role, current
+            raise SkipResource("Either the user or project does not exist.")
 
-        found = False
-        for r in keystone.roles.roles_for_user(user, project):
-            if role is not None and r.id == role.id:
-                found = True
-
-        current.purged = not found
+        try:
+            self._keystone.roles.check(role=role, user=user, project=project)
+            resource.purged = False
+        except Exception:
+            resource.purged = True
 
         ctx.set("role", role)
         ctx.set("user", user)
         ctx.set("project", project)
-        return current
 
-    def do_changes(self, ctx, resource, changes):
-        """
-            Enforce the changes
-        """
+    def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
         user = ctx.get("user")
         project = ctx.get("project")
         role = ctx.get("role")
 
-        keystone = self.get_connection(resource)
-
-        # create the role
         if role is None:
-            role = keystone.roles.create(resource.role)
-            ctx.set_created()
+            role = self._keystone.roles.create(resource.role)
 
-        # create, update or remove
-        if "purged" in changes:
-            if not changes["purged"]["desired"]:  # create a new role user mapping
-                keystone.roles.add_user_role(user, role, project)
-                ctx.set_created()
+        self._keystone.roles.grant(user=user, role=role, project=project)
+        ctx.set_created()
 
-            elif changes["purged"]["desired"]:
-                user.remove_user_role(user, role, project)
-                ctx.set_purged()
+    def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        user = ctx.get("user")
+        project = ctx.get("project")
+        role = ctx.get("role")
+
+        self._keystone.roles.revoke(user=user, role=role, project=project)
+        ctx.set_purged()
+
+    def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
+        assert False, "This should not happen"
 
 
 @provider("openstack::Service", name="openstack")
-class ServiceHandler(KeystoneHandler):
-    def check_resource(self, ctx, resource):
-        current = resource.clone()
-        keystone = self.get_connection(resource)
-        ctx.set("keystone", keystone)
-
+class ServiceHandler(OpenStackHandler):
+    def read_resource(self, ctx, resource):
         service = None
         try:
-            service = keystone.services.find(name=resource.name, type=resource.type)
-            current.description = service.description
+            service = self._keystone.services.find(name=resource.name, type=resource.type)
+            resource.description = service.description
+            resource.purged = False
         except NotFound:
-            current.purged = True
-            current.description = None
-            current.name = None
-            current.type = None
+            resource.purged = True
+            resource.description = None
+            resource.name = None
+            resource.type = None
 
         ctx.set("service", service)
-        return current
 
-    def do_changes(self, ctx, resource, changes):
-        """
-            Enforce the changes
-        """
-        service = ctx.get("service")
-        keystone = ctx.get("keystone")
-        if "purged" in changes:
-            if not changes["purged"]["desired"]:  # it's new
-                keystone.services.create(resource.name, resource.type, resource.description)
-                ctx.set_created()
+    def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        self._keystone.services.create(resource.name, resource.type, description=resource.description)
+        ctx.set_created()
 
-            else:
-                service.delete()
-                ctx.set_purged()
+    def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        ctx.get("service").delete()
+        ctx.set_purged()
 
-        elif len(changes) > 0:
-            raise Exception("Updating services is not supported in the API")
+    def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
+        self._keystone.services.update(ctx.get("service"), description=resource.description)
+        ctx.set_updated()
 
 
 @provider("openstack::EndPoint", name="openstack")
-class EndpointHandler(KeystoneHandler):
-    def check_resource(self, ctx, resource):
-        current = resource.clone()
-
-        keystone = self.get_connection(resource)
-        ctx.set("keystone", keystone)
-
+class EndpointHandler(OpenStackHandler):
+    types = {"admin": "admin_url", "internal": "internal_url", "public": "public_url"}
+    def read_resource(self, ctx, resource):
         service = None
-        for s in keystone.services.list():
+        for s in self._keystone.services.list():
             if resource.service_id == "%s_%s" % (s.type, s.name):
                 service = s
 
         if service is None:
-            raise Exception("Unable to find service to which endpoint belongs")
+            raise SkipResource("Unable to find service to which endpoint belongs")
 
-        endpoint = None
+        endpoints = {}
         try:
-            endpoint = keystone.endpoints.find(service_id=service.id)
-            current.region = endpoint.region
-            current.internal_url = endpoint.internalurl
-            current.admin_url = endpoint.adminurl
-            current.public_url = endpoint.publicurl
+            endpoints = {e.interface: e for e in self._keystone.endpoints.list(region=resource.region, service=service)}
+            for k, v in EndpointHandler.types.items():
+                setattr(resource, v, endpoints[k] if k in endpoints else None)
 
+            resource.purged = False
         except NotFound:
-            current.purged = True
-            current.region = None
-            current.internal_url = None
-            current.admin_url = None
-            current.public_url = None
+            resource.purged = True
+            resource.region = None
+            resource.internal_url = None
+            resource.admin_url = None
+            resource.public_url = None
 
         ctx.set("service", service)
-        ctx.set("endpoint", endpoint)
-        return current
+        ctx.set("endpoints", endpoints)
 
-    def do_changes(self, ctx, resource, changes):
-        """
-            Enforce the changes
-        """
-        keystone = ctx.get("keystone")
-        endpoint = ctx.get("endpoint")
+    def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        assert False, "Should never get here"
+
+    def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        for endpoint in ctx.get("endpoints"):
+            endpoint.delete()
+
+        ctx.set_purged()
+
+    def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
         service = ctx.get("service")
+        endpoints = ctx.get("endpoints")
 
-        if "purged" in changes:
-            if not changes["purged"]["desired"]:  # it is new
-                keystone.endpoints.create(region=resource.region, service_id=service.id,
-                                          publicurl=resource.public_url, adminurl=resource.admin_url,
-                                          internalurl=resource.internal_url)
-
+        for k, v in EndpointHandler.types.items():
+            if k not in endpoints:
+                self._keystone.endpoints.create(service, url=getattr(resource, v), region=resource.region, interface=k)
                 ctx.set_created()
 
-            else:  # delete
-                endpoint.delete()
-                ctx.set_purged()
-
-        elif len(changes) > 0:
-            endpoint.manager.delete(endpoint.id)
-            endpoint.manager.create(region=resource.region, service_id=service.id,
-                                    publicurl=resource.public_url, adminurl=resource.admin_url,
-                                    internalurl=resource.internal_url)
-
-            ctx.set_updated()
+            elif v in changes:
+                self._keystone.endpoints.update(endpoints[k], url=getattr(resource, v))
+                ctx.set_updated()

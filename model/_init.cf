@@ -20,13 +20,7 @@ import ip::services
 import vm
 import ssh
 
-entity PurgeableResource:
-
-end
-
-entity OpenStackResource extends PurgeableResource:
-    bool purged=false
-    bool purge_on_delete=true
+entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
 end
 
 entity Provider:
