@@ -1,5 +1,5 @@
 """
-    Copyright 2016 Inmanta
+    Copyright 2017 Inmanta
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -17,31 +17,18 @@
 """
 
 import os
-import re
 import logging
-import json
-import tempfile
-import urllib
-import time
-import shlex
-import subprocess
-from http import client
 
 from inmanta.execute.proxy import UnknownException
-
-from inmanta.plugins import plugin
-from inmanta.resources import Resource, resource, ResourceNotFoundExcpetion, PurgeableResource
+from inmanta.resources import resource, PurgeableResource
 from inmanta import resources
 from inmanta.agent import handler
-from inmanta.agent.handler import provider, ResourceHandler, SkipResource, cache, ResourceHandler, ResourcePurged, CRUDHandler
+from inmanta.agent.handler import provider, SkipResource, cache, ResourceHandler, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
-
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
-
 from novaclient import client as nova_client
 import novaclient.exceptions
-
 from keystoneclient.auth.identity import v2
 from keystoneauth1 import session
 from keystoneclient.v2_0 import client as keystone_client
@@ -364,27 +351,27 @@ def openstack_dependencies(config_model, resource_model):
     ports = {}
     fips = {}
 
-    for _, resource in resource_model.items():
-        if resource.id.entity_type == "openstack::Project":
-            projects[resource.name] = resource
+    for _, res in resource_model.items():
+        if res.id.entity_type == "openstack::Project":
+            projects[res.name] = res
 
-        elif resource.id.entity_type == "openstack::Network":
-            networks[resource.name] = resource
+        elif res.id.entity_type == "openstack::Network":
+            networks[res.name] = res
 
-        elif resource.id.entity_type == "openstack::Router":
-            routers[resource.name] = resource
+        elif res.id.entity_type == "openstack::Router":
+            routers[res.name] = res
 
-        elif resource.id.entity_type == "openstack::Subnet":
-            subnets[resource.name] = resource
+        elif res.id.entity_type == "openstack::Subnet":
+            subnets[res.name] = res
 
-        elif resource.id.entity_type == "openstack::Host":
-            vms[resource.name] = resource
+        elif res.id.entity_type == "openstack::Host":
+            vms[res.name] = res
 
-        elif resource.id.entity_type == "openstack::HostPort":
-            ports[resource.name] = resource
+        elif res.id.entity_type == "openstack::HostPort":
+            ports[res.name] = res
 
-        elif resource.id.entity_type == "openstack::FloatingIP":
-            fips[resource.name] = resource
+        elif res.id.entity_type == "openstack::FloatingIP":
+            fips[res.name] = res
 
     # they require the tenant to exist
     for network in networks.values():
@@ -419,8 +406,8 @@ def openstack_dependencies(config_model, resource_model):
         fip.requires.add(ports[fip.port])
 
 
-CRED_TIMEOUT=600
-RESOURCE_TIMEOUT=10
+CRED_TIMEOUT = 600
+RESOURCE_TIMEOUT = 10
 
 
 class OpenStackHandler(CRUDHandler):
@@ -448,8 +435,10 @@ class OpenStackHandler(CRUDHandler):
 
     def pre(self, resource):
         self._nova = self.get_nova_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
-        self._neutron = self.get_neutron_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
-        self._keystone = self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+        self._neutron = self.get_neutron_client(resource.auth_url, resource.project, resource.admin_user,
+                                                resource.admin_password)
+        self._keystone = self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user,
+                                                  resource.admin_password)
 
     def post(self, resource):
         self._nova = None
@@ -561,7 +550,7 @@ class VMHandler(ResourceHandler):
     """
     __connections = {}
 
-    def pre(self, resource):
+    def pre(self, ctx, resource):
         """
             Setup a connection with neutron
         """
@@ -576,7 +565,7 @@ class VMHandler(ResourceHandler):
             self._neutron = neutron_client.Client("2.0", session=sess)
             VMHandler.__connections[key] = (self._client, self._neutron)
 
-    def post(self, resource):
+    def post(self, ctx, resource):
         self._client = None
         self._neutron = None
 
@@ -593,7 +582,7 @@ class VMHandler(ResourceHandler):
         else:
             raise Exception("Multiple virtual machines with name %s exist." % name)
 
-    def check_resource(self, resource):
+    def check_resource(self, ctx, resource):
         """
             This method will check what the status of the give resource is on
             openstack.
@@ -610,13 +599,6 @@ class VMHandler(ResourceHandler):
             # The port handler has to handle all network/port related changes
 
         return current
-
-    def list_changes(self, resource):
-        """
-            List the changes that are required to the vm
-        """
-        current = self.check_resource(resource)
-        return self._diff(current, resource)
 
     @cache(timeout=10)
     def _port_id(self, port_name):
@@ -636,7 +618,8 @@ class VMHandler(ResourceHandler):
 
     @cache(timeout=60)
     def get_security_group(self, name=None, id=None):
-        """ Get security group details from openstack
+        """
+            Get security group details from openstack
         """
         if name is not None:
             sgs = self._neutron.list_security_groups(name=name)
@@ -678,9 +661,7 @@ class VMHandler(ResourceHandler):
                 sg_list.append(sg["name"])
         return sg_list
 
-    def do_changes(self, resource):
-        changes = self.list_changes(resource)
-
+    def do_changes(self, ctx, resource, changes):
         # First ensure the key is there.
         # TODO: move this to a specific resource
         keys = {k.name: k for k in self._client.keypairs.list()}
@@ -712,10 +693,7 @@ class VMHandler(ResourceHandler):
 
         return True
 
-    def facts(self, resource):
-        """
-            Get facts about this resource
-        """
+    def facts(self, ctx, resource):
         LOGGER.debug("Finding facts for %s" % resource.id.resource_str())
 
         try:
@@ -749,7 +727,7 @@ class NeutronHandler(ResourceHandler):
     __connections = {}
 
     @classmethod
-    def is_available(self, io):
+    def is_available(cls, io):
         return True
 
     def list_changes(self, resource):
@@ -787,7 +765,7 @@ class NeutronHandler(ResourceHandler):
         self._client = None
         self._session = None
 
-    def pre(self, resource):
+    def pre(self, ctx, resource):
         """
             Setup a connection with neutron
         """
@@ -901,7 +879,7 @@ class NeutronHandler(ResourceHandler):
         else:
             return vms[0]
 
-    def post(self, resource):
+    def post(self, ctx, resource):
         self._client = None
 
 
@@ -953,7 +931,6 @@ class NetworkHandler(OpenStackHandler):
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
         network_id = ctx.get("id")
-        project_id = ctx.get("project_id")
         self._neutron.update_network(network_id, {"network": {"name": resource.name, "router:external": resource.external}})
 
         ctx.fields_updated(("name", "external"))
@@ -974,11 +951,7 @@ class NetworkHandler(OpenStackHandler):
 
 @provider("openstack::Router", name="openstack")
 class RouterHandler(NeutronHandler):
-
-    def check_resource(self, resource):
-        """
-            Check the state of the resource
-        """
+    def check_resource(self, ctx, resource):
         current = resource.clone()
         neutron_version = self.facts(resource)
 
@@ -1032,12 +1005,7 @@ class RouterHandler(NeutronHandler):
 
         return current
 
-    def do_changes(self, resource: Router) -> bool:
-        """
-            Enforce the changes
-        """
-        changes = self.list_changes(resource)
-
+    def do_changes(self, ctx, resource: Router, changes):
         changed = False
         deleted = False
 
@@ -1046,7 +1014,7 @@ class RouterHandler(NeutronHandler):
             raise SkipResource("Cannot create network when project id is not yet known.")
 
         if "purged" in changes:
-            if changes["purged"][1] == False:  # create the network
+            if not changes["purged"][1]:  # create the network
                 self._client.create_router({"router": {"name": resource.name, "tenant_id": project_id}})
                 changed = True
 
@@ -1104,7 +1072,7 @@ class RouterHandler(NeutronHandler):
 
         return changed
 
-    def facts(self, resource: Router):
+    def facts(self, ctx, resource: Router):
         """
             Get facts about this resource
         """
@@ -1128,8 +1096,7 @@ class RouterHandler(NeutronHandler):
 
 @provider("openstack::Subnet", name="openstack")
 class SubnetHandler(NeutronHandler):
-
-    def check_resource(self, resource):
+    def check_resource(self, ctx, resource):
         """
             Check the state of the resource
         """
@@ -1157,12 +1124,7 @@ class SubnetHandler(NeutronHandler):
 
         return current
 
-    def do_changes(self, resource: Subnet) -> bool:
-        """
-            Enforce the changes
-        """
-        changes = self.list_changes(resource)
-
+    def do_changes(self, ctx, resource: Subnet, changes):
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create network when project id is not yet known.")
@@ -1173,7 +1135,7 @@ class SubnetHandler(NeutronHandler):
 
         changed = False
         if "purged" in changes:
-            if changes["purged"][1] == False:  # create the network
+            if not changes["purged"][1]:  # create the network
                 body = {"name": resource.name,
                         "network_id": network_id,
                         "enable_dhcp": resource.dhcp,
@@ -1205,10 +1167,7 @@ class SubnetHandler(NeutronHandler):
         return changed
 
     @cache(timeout=5)
-    def facts(self, resource):
-        """
-            Get facts about this resource
-        """
+    def facts(self, ctx, resource):
         subnets = self._client.list_subnets(name=resource.name)
 
         if "subnets" not in subnets:
@@ -1229,11 +1188,7 @@ class SubnetHandler(NeutronHandler):
 
 @provider("openstack::RouterPort", name="openstack")
 class RouterPortHandler(NeutronHandler):
-
-    def check_resource(self, resource: RouterPort) -> RouterPort:
-        """
-            Check the state of the resource
-        """
+    def check_resource(self, ctx, resource: RouterPort) -> RouterPort:
         current = resource.clone()
         neutron_version = self.facts(resource)
 
@@ -1256,12 +1211,7 @@ class RouterPortHandler(NeutronHandler):
 
         return current
 
-    def do_changes(self, resource: RouterPort) -> bool:
-        """
-            Enforce the changes
-        """
-        changes = self.list_changes(resource)
-
+    def do_changes(self, ctx, resource: RouterPort, changes):
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create network when project id is not yet known.")
@@ -1280,7 +1230,7 @@ class RouterPortHandler(NeutronHandler):
 
         changed = False
         if "purged" in changes:
-            if changes["purged"][1] == False:  # create the router port
+            if not changes["purged"][1]:  # create the router port
                 body_value = {'port': {
                     'admin_state_up': True,
                     'name': resource.name,
@@ -1312,10 +1262,7 @@ class RouterPortHandler(NeutronHandler):
 
         return changed
 
-    def facts(self, resource: RouterPort):
-        """
-            Get facts about this resource
-        """
+    def facts(self, ctx, resource: RouterPort):
         ports = self._client.list_ports(name=resource.name)
 
         if "ports" not in ports:
@@ -1342,10 +1289,7 @@ class HostPortHandler(NeutronHandler):
             return ports[0]
         return None
 
-    def check_resource(self, resource: HostPort) -> HostPort:
-        """
-            Check the state of the resource
-        """
+    def check_resource(self, ctx, resource: HostPort) -> HostPort:
         current = resource.clone()
 
         project_id = self.get_project_id(resource, resource.project)
@@ -1371,12 +1315,7 @@ class HostPortHandler(NeutronHandler):
 
         return current
 
-    def do_changes(self, resource: HostPort) -> bool:
-        """
-            Enforce the changes
-        """
-        changes = self.list_changes(resource)
-
+    def do_changes(self, ctx, resource: HostPort, changes):
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create network when project id is not yet known.")
@@ -1398,7 +1337,7 @@ class HostPortHandler(NeutronHandler):
         try:
             changed = False
             if "purged" in changes and port is None:
-                if changes["purged"][1] == False:  # create the router port
+                if not changes["purged"][1]:  # create the router port
                     body_value = {'port': {'admin_state_up': True, 'name': resource.name, 'network_id': network_id}}
 
                     if resource.address != "" and not resource.dhcp:
@@ -1423,7 +1362,7 @@ class HostPortHandler(NeutronHandler):
                 if port is None:
                     raise SkipResource("Port not found")
 
-                if "portsecurity" in changes and changes["portsecurity"][1] == False:
+                if "portsecurity" in changes and not changes["portsecurity"][1]:
                     self._client.update_port(port=port["id"], body={"port": {"port_security_enabled": False,
                                                                     "security_groups": None}})
 
@@ -1444,7 +1383,7 @@ class HostPortHandler(NeutronHandler):
         return changed
 
     @cache(timeout=5)
-    def facts(self, resource):
+    def facts(self, ctx, resource):
         """
             Get facts about this resource
         """
@@ -1470,7 +1409,8 @@ class HostPortHandler(NeutronHandler):
 class SecurityGroupHandler(NeutronHandler):
     @cache(timeout=60)
     def get_security_group(self, name=None, id=None):
-        """ Get security group details from openstack
+        """
+            Get security group details from openstack
         """
         if name is not None:
             sgs = self._client.list_security_groups(name=name)
@@ -1482,9 +1422,7 @@ class SecurityGroupHandler(NeutronHandler):
 
         return sgs["security_groups"][0]
 
-    def check_resource(self, resource: SecurityGroup) -> SecurityGroup:
-        """ Check the state of the resource
-        """
+    def check_resource(self, ctx, resource: SecurityGroup) -> SecurityGroup:
         current = resource.clone()
         sg = self.get_security_group(name=resource.name)
         if sg is None:
@@ -1581,11 +1519,11 @@ class SecurityGroupHandler(NeutronHandler):
                 # TODO: handle this
                 pass
 
-    def list_changes(self, resource):
+    def list_changes(self, ctx, resource):
         """
             List the changes that are required to the security group
         """
-        current = self.check_resource(resource)
+        current = self.check_resource(ctx, resource)
         changes = self._diff(current, resource)
 
         if "rules" in changes:
@@ -1604,12 +1542,10 @@ class SecurityGroupHandler(NeutronHandler):
 
         return changes
 
-    def do_changes(self, resource: SecurityGroup) -> SecurityGroup:
-        """ Enforce the changes
+    def do_changes(self, ctx, resource: SecurityGroup, changes) -> SecurityGroup:
         """
-        changes = self.list_changes(resource)
-        changed = False
-
+            Enforce the changes
+        """
         sg_id = None
         if "purged" in changes:
             changed = True
@@ -1638,8 +1574,9 @@ class SecurityGroupHandler(NeutronHandler):
         return changed
 
     @cache(timeout=5)
-    def facts(self, resource):
-        """ Discover facts about this securitygroup
+    def facts(self, ctx, resource):
+        """
+            Discover facts about this securitygroup
         """
         return {}
 
@@ -1666,9 +1603,7 @@ class FloatingIPHandler(NeutronHandler):
         else:
             return fip[0]["id"]
 
-    def check_resource(self, resource: FloatingIP) -> FloatingIP:
-        """ Check the state of the resource
-        """
+    def check_resource(self, ctx, resource: FloatingIP) -> FloatingIP:
         current = resource.clone()
         port_id = self.get_port_id(resource.port)
         fip = self.get_floating_ip(port_id)
@@ -1689,10 +1624,7 @@ class FloatingIPHandler(NeutronHandler):
 
         return available_fips
 
-    def do_changes(self, resource: FloatingIP) -> FloatingIP:
-        """ Enforce the changes
-        """
-        changes = self.list_changes(resource)
+    def do_changes(self, ctx, resource: FloatingIP, changes) -> FloatingIP:
         changed = False
 
         project_id = self.get_project_id(resource, resource.project)
@@ -1721,9 +1653,7 @@ class FloatingIPHandler(NeutronHandler):
         return changed
 
     @cache(timeout=5)
-    def facts(self, resource):
-        """ Discover facts about this floating_ip
-        """
+    def facts(self, ctx, resource):
         port_id = self.get_port_id(resource.port)
         fip = self._client.list_floatingips(port_id=port_id)["floatingips"]
         if len(fip) == 0:
@@ -1738,15 +1668,15 @@ def keystone_dependencies(config_model, resource_model):
     projects = {}
     users = {}
     roles = []
-    for _, resource in resource_model.items():
-        if resource.id.entity_type == "openstack::Project":
-            projects[resource.name] = resource
+    for _, res in resource_model.items():
+        if res.id.entity_type == "openstack::Project":
+            projects[res.name] = res
 
-        elif resource.id.entity_type == "openstack::User":
-            users[resource.name] = resource
+        elif res.id.entity_type == "openstack::User":
+            users[res.name] = res
 
-        elif resource.id.entity_type == "openstack::Role":
-            roles.append(resource)
+        elif res.id.entity_type == "openstack::Role":
+            roles.append(res)
 
     for role in roles:
         if role.project not in projects:
@@ -1785,20 +1715,9 @@ class KeystoneHandler(ResourceHandler):
             kc = keystone_client.Client(session=sess)
             return kc
 
-    def list_changes(self, resource):
-        """
-            List the changes that are required to the vm
-        """
-        current = self.check_resource(resource)
-        return self._diff(current, resource)
-
 
 @provider("openstack::Project", name="openstack")
 class ProjectHandler(KeystoneHandler):
-    @classmethod
-    def is_available(self, io):
-        return True
-
     def check_resource(self, resource):
         """
             Check the state of the resource
@@ -1845,7 +1764,7 @@ class ProjectHandler(KeystoneHandler):
 
         changed = False
         if "purged" in changes:
-            if changes["purged"][1] == False:  # create the project
+            if not changes["purged"][1]:  # create the project
                 project.tenants.create(resource.name, description=resource.description, enabled=resource.enabled)
                 changed = True
 
@@ -1867,87 +1786,67 @@ class ProjectHandler(KeystoneHandler):
         try:
             project = keystone.tenants.find(name=resource.name)
             return {"id": project.id, "name": project.name}
-        except:
+        except Exception:
             return {}
 
 
 @provider("openstack::User", name="openstack")
 class UserHandler(KeystoneHandler):
-    @classmethod
-    def is_available(self, io):
-        return True
-
-    def check_resource(self, resource):
+    def check_resource(self, ctx, resource):
         """
             Check the state of the resource
         """
         current = resource.clone()
 
         keystone = self.get_connection(resource)
+        ctx.set("keystone", keystone)
 
         try:
             user = keystone.users.find(name=resource.name)
             current.enabled = user.enabled
             current.email = user.email
+            ctx.set("user", user)
         except NotFound:
             current.purged = True
             current.enabled = None
             current.email = None
             current.name = None
-            user = keystone
 
         # if a password is provided (not ""), check if it works otherwise mark it as "***"
         if resource.password != "":
             try:
                 keystone_client.Client(auth_url=resource.auth_url, username=resource.name, password=resource.password)
-            except:
+            except Exception:
                 current.password = "***"
 
-        return user, current
+        return current
 
-    def _list_changes(self, resource):
-        """
-            List the changes that are required to the vm
-        """
-        user, current = self.check_resource(resource)
-        return user, self._diff(current, resource)
-
-    def list_changes(self, resource):
-        _, changes = self._list_changes(resource)
-        return changes
-
-    def do_changes(self, resource):
+    def do_changes(self, ctx, resource, changes):
         """
             Enforce the changes
         """
-        user, changes = self._list_changes(resource)
-
-        changed = False
+        keystone = ctx.get("keystone")
+        user = ctx.get("user") if ctx.contains("user") else None
         if "purged" in changes:
-            if changes["purged"][1] == False:  # create a new user
-                user.users.create(resource.name, resource.password, email=resource.email, enabled=resource.enabled)
-                changed = True
+            if not changes["purged"]["desired"]:  # create a new user
+                keystone.users.create(resource.name, resource.password, email=resource.email, enabled=resource.enabled)
+                ctx.set_created()
 
-            elif changes["purged"][1] and not changes["purged"][0]:
+            else:
                 user.delete()
-                changed = True
+                ctx.set_purged()
 
         elif len(changes) > 0:
             user.manager.update(user, email=resource.email, enabled=resource.enabled)
             if "password" in changes:
                 user.manager.update_password(user, resource.password)
-            changed = True
 
-        return changed
+            ctx.set_updated()
 
 
 @provider("openstack::Role", name="openstack")
 class RoleHandler(KeystoneHandler):
-    @classmethod
-    def is_available(self, io):
-        return True
-
-    def check_resource(self, resource):
+    def check_resource(self, ctx, resource):
         """
             Check the state of the resource
         """
@@ -1977,59 +1876,45 @@ class RoleHandler(KeystoneHandler):
 
         current.purged = not found
 
-        return user, project, role, current
+        ctx.set("role", role)
+        ctx.set("user", user)
+        ctx.set("project", project)
+        return current
 
-    def _list_changes(self, resource):
-        """
-            List the changes that are required to the vm
-        """
-        user, project, role, current = self.check_resource(resource)
-        return user, project, role, self._diff(current, resource)
-
-    def list_changes(self, resource):
-        _, _, _, changes = self._list_changes(resource)
-        return changes
-
-    def do_changes(self, resource):
+    def do_changes(self, ctx, resource, changes):
         """
             Enforce the changes
         """
-        user, project, role, changes = self._list_changes(resource)
-        changed = False
+        user = ctx.get("user")
+        project = ctx.get("project")
+        role = ctx.get("role")
 
         keystone = self.get_connection(resource)
 
         # create the role
         if role is None:
             role = keystone.roles.create(resource.role)
-            changed = True
+            ctx.set_created()
 
         # create, update or remove
         if "purged" in changes:
-            if changes["purged"][1] == False:  # create a new role
+            if not changes["purged"]["desired"]:  # create a new role user mapping
                 keystone.roles.add_user_role(user, role, project)
-                changed = True
+                ctx.set_created()
 
-            elif changes["purged"][1] and not changes["purged"][0]:
+            elif changes["purged"]["desired"]:
                 user.remove_user_role(user, role, project)
-                changed = True
-
-        return changed
+                ctx.set_purged()
 
 
 @provider("openstack::Service", name="openstack")
 class ServiceHandler(KeystoneHandler):
-    @classmethod
-    def is_available(self, io):
-        return True
-
-    def check_resource(self, resource):
-        """
-            Check the state of the resource
-        """
+    def check_resource(self, ctx, resource):
         current = resource.clone()
         keystone = self.get_connection(resource)
+        ctx.set("keystone", keystone)
 
+        service = None
         try:
             service = keystone.services.find(name=resource.name, type=resource.type)
             current.description = service.description
@@ -2038,56 +1923,36 @@ class ServiceHandler(KeystoneHandler):
             current.description = None
             current.name = None
             current.type = None
-            service = keystone
 
-        return service, current
+        ctx.set("service", service)
+        return current
 
-    def _list_changes(self, resource):
-        """
-            List the changes
-        """
-        service, current = self.check_resource(resource)
-        return service, self._diff(current, resource)
-
-    def list_changes(self, resource):
-        _, changes = self._list_changes(resource)
-        return changes
-
-    def do_changes(self, resource):
+    def do_changes(self, ctx, resource, changes):
         """
             Enforce the changes
         """
-        service, changes = self._list_changes(resource)
-
-        changed = False
+        service = ctx.get("service")
+        keystone = ctx.get("keystone")
         if "purged" in changes:
-            if changes["purged"][0]:  # it's new
-                service.services.create(resource.name, resource.type, resource.description)
-                changed = True
+            if not changes["purged"]["desired"]:  # it's new
+                keystone.services.create(resource.name, resource.type, resource.description)
+                ctx.set_created()
 
             else:
                 service.delete()
-                changed = True
+                ctx.set_purged()
 
         elif len(changes) > 0:
             raise Exception("Updating services is not supported in the API")
 
-        return changed
-
 
 @provider("openstack::EndPoint", name="openstack")
 class EndpointHandler(KeystoneHandler):
-    @classmethod
-    def is_available(self, io):
-        return True
-
-    def check_resource(self, resource):
-        """
-            Check the state of the resource
-        """
+    def check_resource(self, ctx, resource):
         current = resource.clone()
 
         keystone = self.get_connection(resource)
+        ctx.set("keystone", keystone)
 
         service = None
         for s in keystone.services.list():
@@ -2097,6 +1962,7 @@ class EndpointHandler(KeystoneHandler):
         if service is None:
             raise Exception("Unable to find service to which endpoint belongs")
 
+        endpoint = None
         try:
             endpoint = keystone.endpoints.find(service_id=service.id)
             current.region = endpoint.region
@@ -2110,36 +1976,30 @@ class EndpointHandler(KeystoneHandler):
             current.internal_url = None
             current.admin_url = None
             current.public_url = None
-            endpoint = keystone
 
-        return endpoint, service, current
+        ctx.set("service", service)
+        ctx.set("endpoint", endpoint)
+        return current
 
-    def _list_changes(self, resource):
-        endpoint, service, current = self.check_resource(resource)
-        return endpoint, service, self._diff(current, resource)
-
-    def list_changes(self, resource):
-        _, _, changes = self._list_changes(resource)
-        return changes
-
-    def do_changes(self, resource):
+    def do_changes(self, ctx, resource, changes):
         """
             Enforce the changes
         """
-        endpoint, service, changes = self._list_changes(resource)
-        changed = False
+        keystone = ctx.get("keystone")
+        endpoint = ctx.get("endpoint")
+        service = ctx.get("service")
 
         if "purged" in changes:
-            if changes["purged"][0]:  # it is new
-                endpoint.endpoints.create(region=resource.region, service_id=service.id,
+            if not changes["purged"]["desired"]:  # it is new
+                keystone.endpoints.create(region=resource.region, service_id=service.id,
                                           publicurl=resource.public_url, adminurl=resource.admin_url,
                                           internalurl=resource.internal_url)
 
-                changed = True
+                ctx.set_created()
 
             else:  # delete
                 endpoint.delete()
-                changed = True
+                ctx.set_purged()
 
         elif len(changes) > 0:
             endpoint.manager.delete(endpoint.id)
@@ -2147,6 +2007,4 @@ class EndpointHandler(KeystoneHandler):
                                     publicurl=resource.public_url, adminurl=resource.admin_url,
                                     internalurl=resource.internal_url)
 
-            changed = True
-
-        return changed
+            ctx.set_updated()
