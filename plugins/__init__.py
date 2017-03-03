@@ -17,18 +17,18 @@
 """
 
 import os
+import traceback
 import logging
 
 from inmanta.execute.proxy import UnknownException
 from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources
 from inmanta.agent import handler
-from inmanta.agent.handler import provider, SkipResource, cache, ResourceHandler, ResourcePurged, CRUDHandler
+from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
 
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
-from neutronclient import neutron
 
 from novaclient import client as nova_client
 import novaclient.exceptions
@@ -48,8 +48,6 @@ loud_logger.propagate = False
 
 
 LOGGER = logging.getLogger(__name__)
-NULL_UUID = "00000000-0000-0000-0000-000000000000"
-NULL_ID = "00000000000000000000000000000000"
 
 
 class OpenstackResource(PurgeableResource, ManagedResource):
@@ -436,7 +434,7 @@ class OpenStackHandler(CRUDHandler):
 
     @cache(timeout=CRED_TIMEOUT)
     def get_nova_client(self, auth_url, project, admin_user, admin_password):
-        return nova_client.Client("2", session=self.get_session(auth_url, project, admin_user, admin_password))
+        return nova_client.Client("2.1", session=self.get_session(auth_url, project, admin_user, admin_password))
 
     @cache(timeout=CRED_TIMEOUT)
     def get_neutron_client(self, auth_url, project, admin_user, admin_password):
@@ -445,9 +443,6 @@ class OpenStackHandler(CRUDHandler):
     @cache(timeout=CRED_TIMEOUT)
     def get_keystone_client(self, auth_url, project, admin_user, admin_password):
         return keystone_client.Client(session=self.get_session(auth_url, project, admin_user, admin_password))
-
-    def get_keystone(self, resource):
-        return self.get_keystone_client(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
 
     def pre(self, ctx, resource):
         project = resource.admin_tenant
@@ -471,19 +466,27 @@ class OpenStackHandler(CRUDHandler):
             return session.get_project_id()
 
         try:
-            tenant = self.get_keystone(resource).tenants.find(name=name)
-            return tenant.id
+            project = self._keystone.projects.find(name=name)
+            return project.id
         except Exception:
-            return None
+            raise
 
-    def get_network_id(self, project_id, name):
+    def get_network(self, project_id, name=None, network_id=None):
         """
             Retrieve the network id based on the name of the network
         """
+        query = {}
         if project_id is not None:
-            networks = self._neutron.list_networks(tenant_id=project_id, name=name)
+            query["tenant_id"] = project_id
+
+        if name is not None:
+            query["name"] = name
+        elif network_id is not None:
+            query["network_id"] = network_id
         else:
-            networks = self._neutron.list_networks(name=name)
+            raise Exception("Either a name or an id needs to be provided.")
+
+        networks = self._neutron.list_networks(**query)
 
         if len(networks["networks"]) == 0:
             return None
@@ -492,13 +495,18 @@ class OpenStackHandler(CRUDHandler):
             raise Exception("Found more than one network with name %s for project %s" % (name, project_id))
 
         else:
-            return networks["networks"][0]["id"]
+            return networks["networks"][0]
 
-    def get_subnet_id(self, project_id, name):
+    def get_subnet(self, project_id, name=None, subnet_id=None):
         """
             Retrieve the subnet id based on the name of the network
         """
-        subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
+        if name is not None:
+            subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
+        elif subnet_id is not None:
+            subnets = self._neutron.list_subnets(tenant_id=project_id, id=subnet_id)
+        else:
+            raise Exception("Either a name or an id needs to be provided.")
 
         if len(subnets["subnets"]) == 0:
             return None
@@ -507,13 +515,18 @@ class OpenStackHandler(CRUDHandler):
             raise Exception("Found more than one subnet with name %s for project %s" % (name, project_id))
 
         else:
-            return subnets["subnets"][0]["id"]
+            return subnets["subnets"]
 
-    def get_router_id(self, project_id, name):
+    def get_router(self, project_id, name=None, router_id=None):
         """
             Retrieve the router id based on the name of the network
         """
-        routers = self._neutron.list_routers(name=name)
+        if name is not None:
+            routers = self._neutron.list_routers(tenant_id=project_id, name=name)
+        elif router_id is not None:
+            routers = self._neutron.list_routers(tenant_id=project_id, id=router_id)
+        else:
+            raise Exception("Either a name or an id needs to be provided.")
 
         if len(routers["routers"]) == 0:
             return None
@@ -522,7 +535,7 @@ class OpenStackHandler(CRUDHandler):
             raise Exception("Found more than one router with name %s for project %s" % (name, project_id))
 
         else:
-            return routers["routers"][0]["id"]
+            return routers["routers"]
 
     def get_host_id(self, project_id, name):
         return self.get_host(project_id, name).id
@@ -542,78 +555,46 @@ class OpenStackHandler(CRUDHandler):
         else:
             return vms[0]
 
-    def get_host_for_id(self, id):
+    def get_host_for_id(self, server_id):
         """
             Retrieve the router id based on the name of the network
         """
-        vms = self._nova.servers.findall(id=id)
+        vms = self._nova.servers.findall(id=server_id)
 
         if len(vms) == 0:
             return None
 
         elif len(vms) > 1:
-            raise Exception("Found more than one VM with id %s" % (id))
+            raise Exception("Found more than one VM with id %s" % (server_id))
 
         else:
             return vms[0]
 
 
 @provider("openstack::Host", name="openstack")
-class VMHandler(ResourceHandler):
-    """
-        This class handles managing openstack resources
-    """
-    __connections = {}
-
-    def pre(self, ctx, resource):
-        """
-            Setup a connection with neutron
-        """
-        key = (resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
-        if key in VMHandler.__connections:
-            self._client, self._neutron = VMHandler.__connections[key]
-        else:
-            auth = v2.Password(auth_url=resource.auth_url, username=resource.admin_user, password=resource.admin_password,
-                               tenant_name=resource.project)
-            sess = session.Session(auth=auth)
-            self._client = nova_client.Client("2", session=sess)
-            self._neutron = neutron_client.Client("2.0", session=sess)
-            VMHandler.__connections[key] = (self._client, self._neutron)
-
-    def post(self, ctx, resource):
-        self._client = None
-        self._neutron = None
-
+class HostHandler(OpenStackHandler):
     @cache(timeout=10)
-    def get_vm(self, name):
-        server = self._client.servers.list(search_opts={"name": name})
+    def get_vm(self, ctx, resource):
+        if resource.project == resource.admin_tenant:
+            servers = self._nova.servers.list(search_opts={"name": resource.name})
+        else:
+            try:
+                project_id = self.get_project_id(resource, resource.project)
+                servers = self._nova.servers.list(search_opts={"all_tenants": True, "tenant_id": project_id,
+                                                               "name": resource.name})
+            except Exception:
+                ctx.exception("Unable to retrieve server list with a scoped login on project %(admin_project)s, "
+                              "for project %(project)s. This only works with admin credentials.",
+                              admin_project=resource.admin_tenant, project=resource.project, traceback=traceback.format_exc())
 
-        if len(server) == 0:
+        if len(servers) == 0:
             return None
 
-        elif len(server) == 1:
-            return server[0]
+        elif len(servers) == 1:
+            return servers[0]
 
         else:
-            raise Exception("Multiple virtual machines with name %s exist." % name)
-
-    def check_resource(self, ctx, resource):
-        """
-            This method will check what the status of the give resource is on
-            openstack.
-        """
-        current = resource.clone()
-        server = self.get_vm(resource.name)
-
-        if server is None:
-            current.purged = True
-
-        else:
-            current.purged = False
-            current.security_groups = [sg.name for sg in server.list_security_group()]
-            # The port handler has to handle all network/port related changes
-
-        return current
+            raise Exception("Multiple virtual machines with name %s exist." % resource.name)
 
     @cache(timeout=10)
     def _port_id(self, port_name):
@@ -632,14 +613,14 @@ class VMHandler(ResourceHandler):
         return None
 
     @cache(timeout=60)
-    def get_security_group(self, name=None, id=None):
+    def get_security_group(self, name=None, group_id=None):
         """
             Get security group details from openstack
         """
         if name is not None:
             sgs = self._neutron.list_security_groups(name=name)
-        elif id is not None:
-            sgs = self._neutron.list_security_groups(id=id)
+        elif group_id is not None:
+            sgs = self._neutron.list_security_groups(id=group_id)
 
         if len(sgs["security_groups"]) == 0:
             return None
@@ -652,7 +633,7 @@ class VMHandler(ResourceHandler):
         if port_id is None:
             network = self._get_subnet_id(port["network"])
             if network is None:
-                return None
+                raise SkipResource("Network %s not found" % port["network"])
             nic["net-id"] = network
             if not port["dhcp"] and port["address"] is not None:
                 nic["v4-fixed-ip"] = port["address"]
@@ -676,43 +657,67 @@ class VMHandler(ResourceHandler):
                 sg_list.append(sg["name"])
         return sg_list
 
-    def do_changes(self, ctx, resource, changes):
-        # First ensure the key is there.
-        # TODO: move this to a specific resource
-        keys = {k.name: k for k in self._client.keypairs.list()}
+    def _ensure_key(self, ctx, resource):
+        keys = {k.name: k for k in self._nova.keypairs.list()}
         if resource.key_name not in keys:
-            self._client.keypairs.create(resource.key_name, resource.key_value)
+            self._nova.keypairs.create(resource.key_name, resource.key_value)
+            ctx.info("Created a new keypair with name %(name)s", name=resource.key_name)
 
-        if "purged" in changes:
-            if changes["purged"][0]:  # create
-                flavor = self._client.flavors.find(name=resource.flavor)
-                nics = self._build_nic_list(resource.ports)
-                server = self._client.servers.create(resource.name, flavor=flavor.id,
-                                                     security_groups=self._build_sg_list(resource.security_groups),
-                                                     image=resource.image, key_name=resource.key_name,
-                                                     userdata=resource.user_data, nics=nics)
-            elif changes["purged"][1]:
-                server = self._client.servers.find(name=resource.name)
-                server.delete()
+    def read_resource(self, ctx, resource):
+        """
+            This method will check what the status of the give resource is on
+            openstack.
+        """
+        server = self.get_vm(ctx, resource)
+        if server is None:
+            resource.purged = True
 
-        elif "security_groups" in changes:
-            current = set(changes["security_groups"][0])
-            desired = set(changes["security_groups"][1])
+        else:
+            resource.purged = False
+            resource.security_groups = [sg.name for sg in server.list_security_group()]
+            # The port handler has to handle all network/port related changes
 
-            server = self._client.servers.find(name=resource.name)
+        ctx.set("server", server)
+
+    def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        if resource.admin_tenant != resource.project:
+            ctx.error("The nova API does not allow to create virtual machines in an other project than the one logged into."
+                      " Current login %(admin_project)s, requested project %(project)s",
+                      admin_project=resource.admin_tenant, project=resource.project)
+            raise Exception()
+
+        self._ensure_key(ctx, resource)
+        flavor = self._nova.flavors.find(name=resource.flavor)
+        nics = self._build_nic_list(resource.ports)
+        self._nova.servers.create(resource.name, flavor=flavor.id, userdata=resource.user_data, nics=nics,
+                                  security_groups=self._build_sg_list(resource.security_groups),
+                                  image=resource.image, key_name=resource.key_name)
+        ctx.set_created()
+
+    def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
+        ctx.get("server").delete()
+
+    def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
+        server = ctx.get("server")
+
+        self._ensure_key(ctx, resource)
+        if "security_groups" in changes:
+            current = set(changes["security_groups"]["current"])
+            desired = set(changes["security_groups"]["desired"])
+
             for new_rule in (desired - current):
-                self._client.servers.add_security_group(server, new_rule)
+                self._nova.servers.add_security_group(server, new_rule)
 
             for remove_rule in (current - desired):
-                self._client.servers.remove_security_group(server, remove_rule)
+                self._nova.servers.remove_security_group(server, remove_rule)
 
-        return True
+        ctx.set_updated()
 
     def facts(self, ctx, resource):
-        LOGGER.debug("Finding facts for %s" % resource.id.resource_str())
+        ctx.debug("Finding facts for %s" % resource.id.resource_str())
 
         try:
-            vm = self.cache.get_or_else(key="nova_servers", function=self._client.servers.find, timeout=60, name=resource.name)
+            vm = self.get_vm(ctx, resource)
 
             networks = vm.networks
 
@@ -733,162 +738,6 @@ class VMHandler(ResourceHandler):
             return facts
         except Exception:
             return {}
-
-
-class NeutronHandler(ResourceHandler):
-    """
-        Holds common routines for all neutron handlers
-    """
-    __connections = {}
-
-    @classmethod
-    def is_available(cls, io):
-        return True
-
-    def _diff(self, current, desired):
-        changes = {}
-
-        # check attributes
-        for field in desired.__class__.fields:
-            current_value = getattr(current, field)
-            desired_value = getattr(desired, field)
-
-            if desired_value is not None and current_value is None:
-                try:
-                    id = getattr(current, field + "_id")
-                    converter = getattr(self, "get_%s_id" % field)
-                    desired_value = converter(self.get_project_id(desired, desired.project), desired_value)
-                    current_value = id
-                except AttributeError:
-                    pass
-
-            if current_value != desired_value:
-                changes[field] = (current_value, desired_value)
-
-        return changes
-
-    def __init__(self, agent, io=None):
-        super().__init__(agent, io)
-
-        self._client = None
-        self._session = None
-
-    def pre(self, ctx, resource):
-        """
-            Setup a connection with neutron
-        """
-        key = (resource.auth_url, resource.admin_user, resource.admin_password, resource.admin_tenant)
-        if key in NeutronHandler.__connections:
-            self._client, self._session = NeutronHandler.__connections[key]
-        else:
-            auth = v2.Password(auth_url=resource.auth_url, username=resource.admin_user,
-                               password=resource.admin_password, tenant_name=resource.admin_tenant)
-            self._session = session.Session(auth=auth)
-            self._client = neutron_client.Client("2.0", session=self._session)
-            NeutronHandler.__connections[key] = (self._client, self._session)
-
-    @cache(ignore=["resource"])
-    def get_project_id(self, resource, name):
-        """
-            Retrieve the id of a project based on the given name
-        """
-        kc = keystone_client.Client(session=self._session)
-
-        # Fallback for non admin users
-        if resource.admin_tenant == name:
-            return self._session.get_project_id()
-
-        try:
-            tenant = kc.tenants.find(name=name)
-            return tenant.id
-        except Exception:
-            return None
-
-    def get_network_id(self, project_id, name):
-        """
-            Retrieve the network id based on the name of the network
-        """
-        if project_id is not None:
-            networks = self._client.list_networks(tenant_id=project_id, name=name)
-        else:
-            networks = self._client.list_networks(name=name)
-
-        if len(networks["networks"]) == 0:
-            return None
-
-        elif len(networks["networks"]) > 1:
-            raise Exception("Found more than one network with name %s for project %s" % (name, project_id))
-
-        else:
-            return networks["networks"][0]["id"]
-
-    def get_subnet_id(self, project_id, name):
-        """
-            Retrieve the subnet id based on the name of the network
-        """
-        subnets = self._client.list_subnets(tenant_id=project_id, name=name)
-
-        if len(subnets["subnets"]) == 0:
-            return None
-
-        elif len(subnets["subnets"]) > 1:
-            raise Exception("Found more than one subnet with name %s for project %s" % (name, project_id))
-
-        else:
-            return subnets["subnets"][0]["id"]
-
-    def get_router_id(self, project_id, name):
-        """
-            Retrieve the router id based on the name of the network
-        """
-        routers = self._client.list_routers(name=name)
-
-        if len(routers["routers"]) == 0:
-            return None
-
-        elif len(routers["routers"]) > 1:
-            raise Exception("Found more than one router with name %s for project %s" % (name, project_id))
-
-        else:
-            return routers["routers"][0]["id"]
-
-    def get_host_id(self, project_id, name):
-        return self.get_host(project_id, name).id
-
-    def get_host(self, project_id, name):
-        """
-            Retrieve the router id based on the name of the network
-        """
-        nc = nova_client.Client("2", session=self._session)
-        vms = nc.servers.findall(name=name)
-
-        if len(vms) == 0:
-            return None
-
-        elif len(vms) > 1:
-            raise Exception("Found more than one VM with name %s for project %s" % (name, project_id))
-
-        else:
-            return vms[0]
-
-    def get_host_for_id(self, id):
-        """
-            Retrieve the router id based on the name of the network
-        """
-        nc = nova_client.Client("2", session=self._session)
-        vms = nc.servers.findall(id=id)
-
-        if len(vms) == 0:
-            return None
-
-        elif len(vms) > 1:
-            raise Exception("Found more than one VM with id %s" % (id))
-
-        else:
-            return vms[0]
-
-    def post(self, ctx, resource):
-        self._client = None
 
 
 @provider("openstack::Network", name="openstack")
@@ -962,133 +811,127 @@ class NetworkHandler(OpenStackHandler):
 
 
 @provider("openstack::Router", name="openstack")
-class RouterHandler(NeutronHandler):
-    def check_resource(self, ctx, resource):
-        current = resource.clone()
-        neutron_version = self.facts(resource)
+class RouterHandler(OpenStackHandler):
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        neutron_version = self.facts(ctx, resource)
 
         if len(neutron_version) > 0:
-            current.id = neutron_version["id"]
+            ctx.set("neutron", neutron_version)
+            resource.purged = False
+
         else:
-            current.id = NULL_UUID
-            current.purged = True
+            raise ResourcePurged()
 
         # get a list of all attached subnets
-        if current.id != NULL_UUID:
-            ext_name = ""
-            external_net_id = ""
-            if "external_gateway_info" in neutron_version and \
-                    neutron_version["external_gateway_info"] is not None:
-                external_net_id = neutron_version["external_gateway_info"]["network_id"]
+        ext_name = ""
+        external_net_id = ""
+        if "external_gateway_info" in neutron_version and neutron_version["external_gateway_info"] is not None:
+            external_net_id = neutron_version["external_gateway_info"]["network_id"]
 
-                networks = self._client.list_networks(id=external_net_id)
-                if len(networks["networks"]) == 1:
-                    ext_name = networks["networks"][0]["name"]
+            networks = self._neutron.list_networks(id=external_net_id)
+            if len(networks["networks"]) == 1:
+                ext_name = networks["networks"][0]["name"]
 
-            current.gateway = ext_name
+        resource.gateway = ext_name
 
-            ports = self._client.list_ports(device_id=current.id)
-            subnet_list = []
-            for port in ports["ports"]:
-                subnets = port["fixed_ips"]
-                if port["name"] == "" or port["name"] not in current.ports:
-                    for subnet in subnets:
-                        if subnet != NULL_UUID:
-                            try:
-                                subnet_details = self._client.show_subnet(subnet["subnet_id"])
-                                if subnet_details["subnet"]["network_id"] != external_net_id:
-                                    subnet_list.append(subnet_details["subnet"]["name"])
+        ports = self._neutron.list_ports(device_id=neutron_version["id"])
+        subnet_list = []
+        for port in ports["ports"]:
+            subnets = port["fixed_ips"]
+            if port["name"] == "" or port["name"] not in resource.ports:
+                for subnet in subnets:
+                    try:
+                        subnet_details = self._neutron.show_subnet(subnet["subnet_id"])
+                        if subnet_details["subnet"]["network_id"] != external_net_id:
+                            subnet_list.append(subnet_details["subnet"]["name"])
 
-                            except exceptions.NeutronClientException:
-                                pass
+                    except exceptions.NeutronClientException:
+                        pass
 
-            current.subnets = sorted(subnet_list)
+        resource.subnets = sorted(subnet_list)
 
-            routes = {}
-            for route in neutron_version["routes"]:
-                routes[route["destination"]] = route["nexthop"]
+        routes = {}
+        for route in neutron_version["routes"]:
+            routes[route["destination"]] = route["nexthop"]
 
-            current.routes = routes
+        resource.routes = routes
 
-        else:
-            current.gateway = ""
-            current.subnets = []
-            current.routes = {}
-
-        return current
-
-    def do_changes(self, ctx, resource: Router, changes):
-        changed = False
-        deleted = False
-
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create network when project id is not yet known.")
 
-        if "purged" in changes:
-            if not changes["purged"][1]:  # create the network
-                self._client.create_router({"router": {"name": resource.name, "tenant_id": project_id}})
-                changed = True
+        result = self._neutron.create_router({"router": {"name": resource.name, "tenant_id": project_id}})
+        router_id = result["router"]["id"]
+        ctx.info("Created router with id %(id)s", router_id)
+        ctx.set_created()
 
-            elif changes["purged"][1] and not changes["purged"][0]:
-                self._client.delete_router(resource.id)
-                changed = True
-                deleted = True
+        if len(resource.subnets) > 0:
+            self._update_subnets(router_id, [], resource.subnets)
+            ctx.info("Added subnets to router with id %(id)s", router_id)
 
-        elif "name" in changes:
-            self._client.update_router(resource.id, {"router": {"name": resource.name}})
-            changed = True
+        if resource.gateway is not None and resource.gateway != "":
+            self._set_gateway(router_id, resource.gateway)
+            ctx.info("Set gateway of router with id %(id)s", router_id)
 
-        if deleted:
-            return changed
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        self._neutron.delete_router(ctx.get("neutron")["id"])
+        ctx.set_purged()
 
-        router_facts = self.facts(resource)
+    def _update_subnets(self, router_id, current, desired):
+        current = set(current)
+        to = set(desired)
 
-        # if the router exists and changes are required in the interfaces, make them
+        # subnets to add to the router
+        for subnet in (to - current):
+            # query for the subnet id
+            subnet_data = self._neutron.list_subnets(name=subnet)
+            if "subnets" not in subnet_data or len(subnet_data["subnets"]) != 1:
+                raise Exception("Unable to find id of subnet %s" % subnet)
+
+            subnet_id = subnet_data["subnets"][0]["id"]
+            self._neutron.add_interface_router(router=router_id, body={"subnet_id": subnet_id})
+
+        # subnets to delete
+        for subnet in (current - to):
+            # query for the subnet id
+            subnet_data = self._neutron.list_subnets(name=subnet)
+            if "subnets" not in subnet_data or len(subnet_data["subnets"]) != 1:
+                raise Exception("Unable to find id of subnet %s" % subnet)
+
+            subnet_id = subnet_data["subnets"][0]["id"]
+            self._neutron.remove_interface_router(router=router_id, body={"subnet_id": subnet_id})
+
+    def _set_gateway(self, router_id, network):
+        network_id = self.get_network(None, name=network)
+        if network_id is None:
+            raise Exception("Unable to set router gateway because the gateway network that does not exist.")
+
+        self._neutron.add_gateway_router(router_id, {'network_id': network_id})
+
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
+        router_id = ctx.get("neutron")["id"]
+        if "name" in changes:
+            self._neutron.update_router(router_id, {"router": {"name": resource.name}})
+            ctx.set_updated()
+
         if "subnets" in changes:
-            current = set(changes["subnets"][0])
-            to = set(changes["subnets"][1])
-
-            # subnets to add to the router
-            for subnet in (to - current):
-                # query for the subnet id
-                subnet_data = self._client.list_subnets(name=subnet)
-                if "subnets" not in subnet_data or len(subnet_data["subnets"]) != 1:
-                    raise Exception("Unable to find id of subnet %s" % subnet)
-
-                subnet_id = subnet_data["subnets"][0]["id"]
-
-                self._client.add_interface_router(router=router_facts["id"], body={"subnet_id": subnet_id})
-
-            # subnets to delete
-            for subnet in (current - to):
-                # query for the subnet id
-                subnet_data = self._client.list_subnets(name=subnet)
-                if "subnets" not in subnet_data or len(subnet_data["subnets"]) != 1:
-                    raise Exception("Unable to find id of subnet %s" % subnet)
-
-                subnet_id = subnet_data["subnets"][0]["id"]
-
-                self._client.remove_interface_router(router=router_facts["id"], body={"subnet_id": subnet_id})
+            self._update_subnets(router_id, changes["subnets"]["current"], changes["subnets"]["desired"])
+            ctx.info("Modified subnets of router with id %(id)s", router_id)
+            ctx.set_updated()
 
         if "gateway" in changes:
-            network_id = self.get_network_id(None, changes["gateway"][1])
-            if network_id is None:
-                raise Exception("Unable to set router gateway because the gateway network that does not exist.")
-
-            self._client.add_gateway_router(router_facts["id"], {'network_id': network_id})
+            self._set_gateway(router_id, resource.gateway)
+            ctx.info("Modified gateway of router with id %(id)s", router_id)
+            ctx.set_updated()
 
         if "routes" in changes:
-            self._client.update_router(router_facts["id"], {"router": {"routes": [{"nexthop": n, "destination": d}
-                                                                                  for d, n in resource.routes.items()]}})
+            ctx.set_updated()
+            self._neutron.update_router(router_id, {"router": {"routes": [{"nexthop": n, "destination": d}
+                                                                          for d, n in resource.routes.items()]}})
 
-        return changed
-
-    def facts(self, ctx, resource: Router):
-        """
-            Get facts about this resource
-        """
-        routers = self._client.list_routers(name=resource.name)
+    def facts(self, ctx, resource: Router) -> dict:
+        routers = self._neutron.list_routers(name=resource.name)
 
         if "routers" not in routers:
             return {}
@@ -1107,80 +950,60 @@ class RouterHandler(NeutronHandler):
 
 
 @provider("openstack::Subnet", name="openstack")
-class SubnetHandler(NeutronHandler):
-    def check_resource(self, ctx, resource):
-        """
-            Check the state of the resource
-        """
-        current = resource.clone()
-        neutron_version = self.facts(resource)
+class SubnetHandler(OpenStackHandler):
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        neutron_version = self.facts(ctx, resource)
 
         if len(neutron_version) > 0:
-            current.id = neutron_version["id"]
-            current.network_address = neutron_version["cidr"]
-            current.dhcp = neutron_version["enable_dhcp"]
-            current.network_id = neutron_version["network_id"]
+            resource.purged = False
+            resource.id = neutron_version["id"]
+            resource.network_address = neutron_version["cidr"]
+            resource.dhcp = neutron_version["enable_dhcp"]
+            resource.network_id = neutron_version["network_id"]
 
             pool = neutron_version["allocation_pools"][0]
             if resource.allocation_start != "" and resource.allocation_end != "":  # only change when they are both set
-                current.allocation_start = pool["start"]
-                current.allocation_end = pool["end"]
+                resource.allocation_start = pool["start"]
+                resource.allocation_end = pool["end"]
 
+            ctx.set("neutron", neutron_version)
         else:
-            current.id = 0
-            current.purged = True
-            current.network_address = ""
-            current.network_id = NULL_UUID
-            current.allocation_start = ""
-            current.allocation_end = ""
+            raise ResourcePurged()
 
-        return current
-
-    def do_changes(self, ctx, resource: Subnet, changes):
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create network when project id is not yet known.")
 
-        network_id = self.get_network_id(project_id, resource.network)
-        if network_id is None:
+        network = self.get_network(project_id, name=resource.network)
+        if network is None:
             raise Exception("Unable to create subnet because of network that does not exist.")
 
-        changed = False
-        if "purged" in changes:
-            if not changes["purged"][1]:  # create the network
-                body = {"name": resource.name,
-                        "network_id": network_id,
-                        "enable_dhcp": resource.dhcp,
-                        "cidr": resource.network_address,
-                        "ip_version": 4,
-                        "tenant_id": project_id}
+        body = {"name": resource.name, "network_id": network["id"], "enable_dhcp": resource.dhcp,
+                "cidr": resource.network_address, "ip_version": 4, "tenant_id": project_id}
 
-                if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
-                    body["allocation_pools"] = [{"start": resource.allocation_start,
-                                                 "end": resource.allocation_end}]
+        if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
+            body["allocation_pools"] = [{"start": resource.allocation_start, "end": resource.allocation_end}]
 
-                self._client.create_subnet({"subnet": body})
-                changed = True
+        self._neutron.create_subnet({"subnet": body})
+        ctx.set_created()
 
-            elif changes["purged"][1] and not changes["purged"][0]:
-                self._client.delete_subnet(resource.id)
-                changed = True
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        neutron = ctx.get("neutron")
+        self._neutron.delete_subnet(neutron["id"])
 
-        elif len(changes) > 0:
-            neutron_version = self.facts(resource)
-            body = {"subnet": {"enable_dhcp": resource.dhcp}}
-            if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
-                body["allocation_pools"] = [{"start": resource.allocation_start,
-                                             "end": resource.allocation_end}]
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
+        neutron = ctx.get("neutron")
+        body = {"subnet": {"enable_dhcp": resource.dhcp}}
+        if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
+            body["allocation_pools"] = [{"start": resource.allocation_start,
+                                         "end": resource.allocation_end}]
 
-            self._client.update_subnet(neutron_version["id"], body)
-            changed = True
-
-        return changed
+        self._neutron.update_subnet(neutron["id"], body)
 
     @cache(timeout=5)
     def facts(self, ctx, resource):
-        subnets = self._client.list_subnets(name=resource.name)
+        subnets = self._neutron.list_subnets(name=resource.name)
 
         if "subnets" not in subnets:
             return {}
@@ -1199,83 +1022,87 @@ class SubnetHandler(NeutronHandler):
 
 
 @provider("openstack::RouterPort", name="openstack")
-class RouterPortHandler(NeutronHandler):
-    def check_resource(self, ctx, resource: RouterPort) -> RouterPort:
-        current = resource.clone()
-        neutron_version = self.facts(resource)
-
-        if len(neutron_version) > 0:
-            current.id = neutron_version["id"]
-            if neutron_version["device_id"] == "":
-                current.router_id = NULL_ID
-            else:
-                current.router_id = neutron_version["device_id"]
-
-            current.network_id = neutron_version["network_id"]
-
-        else:
-            current.id = 0
-            current.purged = True
-            current.subnet_id = NULL_UUID
-            current.router_id = NULL_UUID
-            current.network_id = NULL_UUID
-            current.address = ""
-
-        return current
-
-    def do_changes(self, ctx, resource: RouterPort, changes):
+class RouterPortHandler(OpenStackHandler):
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create network when project id is not yet known.")
 
-        subnet_id = self.get_subnet_id(project_id, resource.subnet)
-        if subnet_id is None:
-            raise SkipResource("Unable to create router port because the subnet does not exist.")
+        neutron_version = self.facts(ctx, resource)
+        ctx.set("neutron", neutron_version)
+        ctx.set("project_id", project_id)
 
-        network_id = self.get_network_id(project_id, resource.network)
-        if network_id is None:
+        router = None
+        if len(neutron_version) > 0:
+            # Router stuff
+            if neutron_version["device_id"] == "":
+                resource.router = ""
+            else:
+                router = self.get_router(project_id, router_id=neutron_version["device_id"])
+                resource.router = router["name"]
+
+            # Network stuff
+            network = self.get_network(project_id, network_id=neutron_version["network_id"])
+            resource.network = network["name"]
+            ctx.set("network", network)
+
+            # IP address / subnet stuff
+            subnet = None
+            if len(neutron_version["fixed_ips"]) > 1:
+                raise Exception("This handler only supports ports that have an address in a single subnet.")
+            elif len(neutron_version["fixed_ips"]) == 0:
+                resource.subnet = ""
+                resource.address = ""
+            else:
+                subnet = self.get_subnet(project_id, subnet_id=neutron_version["fixed_ips"][0]["subnet_id"])
+                resource.subnet = subnet["name"]
+                resource.address = neutron_version["fixed_ips"][0]["ip_address"]
+
+            ctx.set("subnet", subnet)
+
+            resource.purged = False
+        else:
+            raise ResourcePurged()
+
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        project_id = ctx.get("project_id")
+
+        network = self.get_network(project_id, name=resource.network)
+        if network is None:
             raise SkipResource("Unable to create router port because the network does not exist.")
 
-        router_id = self.get_router_id(project_id, resource.router)
-        if router_id is None:
+        subnet = self.get_subnet(project_id, name=resource.subnet)
+        if subnet is None:
+            raise SkipResource("Unable to create router port because the subnet does not exist.")
+
+        router = self.get_router(project_id, name=resource.router)
+        if router is None:
             raise SkipResource("Unable to create router port because the router does not exist.")
 
-        changed = False
-        if "purged" in changes:
-            if not changes["purged"][1]:  # create the router port
-                body_value = {'port': {
-                    'admin_state_up': True,
-                    'name': resource.name,
-                    'network_id': network_id
-                }
-                }
-                if resource.address != "":
-                    body_value["port"]["fixed_ips"] = [{"subnet_id": subnet_id, "ip_address": resource.address}]
+        body_value = {'port': {'admin_state_up': True, 'name': resource.name, 'network_id': network["id"]}}
+        if resource.address != "":
+            body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
 
-                result = self._client.create_port(body=body_value)
+        result = self._neutron.create_port(body=body_value)
 
-                if "port" not in result:
-                    raise Exception("Unable to create port.")
+        if "port" not in result:
+            raise Exception("Unable to create port.")
 
-                port_id = result["port"]["id"]
+        port_id = result["port"]["id"]
 
-                # attach it to the router
-                self._client.add_interface_router(router_id, body={"port_id": port_id})
-                changed = True
+        # attach it to the router
+        self._neutron.add_interface_router(router["id"], body={"port_id": port_id})
+        ctx.set_created()
 
-            elif changes["purged"][1] and not changes["purged"][0]:
-                # self._client.delete_port(resource.id)
-                changed = True
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        self._neutron.delete_port(ctx.get("neutron")["id"])
+        ctx.set_purged()
 
-        elif len(changes) > 0:
-            # TODO
-
-            changed = True
-
-        return changed
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
+        raise SkipResource("Making changes to router ports is not supported.")
 
     def facts(self, ctx, resource: RouterPort):
-        ports = self._client.list_ports(name=resource.name)
+        ports = self._neutron.list_ports(name=resource.name)
 
         if "ports" not in ports:
             return {}
@@ -1294,112 +1121,109 @@ class RouterPortHandler(NeutronHandler):
 
 
 @provider("openstack::HostPort", name="openstack")
-class HostPortHandler(NeutronHandler):
+class HostPortHandler(OpenStackHandler):
     def get_port(self, network_id, device_id):
-        ports = self._client.list_ports(network_id=network_id, device_id=device_id)["ports"]
+        ports = self._neutron.list_ports(network_id=network_id, device_id=device_id)["ports"]
         if len(ports) > 0:
             return ports[0]
         return None
 
-    def check_resource(self, ctx, resource: HostPort) -> HostPort:
-        current = resource.clone()
-
-        project_id = self.get_project_id(resource, resource.project)
-        network_id = self.get_network_id(project_id, resource.network)
-        vm = self.get_host(project_id, resource.host)
-        if vm is not None:
-            port = self.get_port(network_id, vm.id)
-        else:
-            port = None
-
-        if port is not None:
-            # we always use port 0 as the managed port in case multiple ports exist on this network
-            # for this given VM
-            if not resource.dhcp:
-                current.address = port["fixed_ips"][0]["ip_address"]
-            current.portsecurity = port["port_security_enabled"]
-            current.name = port["name"]
-
-        else:
-            current.id = 0
-            current.purged = True
-            current.address = ""
-
-        return current
-
-    def do_changes(self, ctx, resource: HostPort, changes):
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
-            raise SkipResource("Cannot create network when project id is not yet known.")
+            raise SkipResource("Cannot create  a host port when project id is not yet known.")
+        ctx.set("project_id", project_id)
 
-        subnet_id = self.get_subnet_id(project_id, resource.subnet)
-        if subnet_id is None:
-            raise SkipResource("Unable to create host port because the subnet does not exist.")
-
-        network_id = self.get_network_id(project_id, resource.network)
-        if network_id is None:
-            raise SkipResource("Unable to create host port because the network does not exist.")
+        network = self.get_network(project_id, resource.network)
+        if network is None:
+            raise SkipResource("Network %s for port %s not found." % (resource.network, resource.name))
+        ctx.set("network", network)
 
         vm = self.get_host(project_id, resource.host)
         if vm is None:
-            raise SkipResource("Unable to create host port because the router does not exist.")
+            raise SkipResource("Unable to create host port because the vm does not exist.")
+        ctx.set("vm", vm)
 
-        port = self.get_port(network_id, vm.id)
+        port = self.get_port(network["id"], vm.id)
+        ctx.set("port", port)
+        if port is None:
+            raise ResourcePurged()
+
+        resource.purged = False
+        if not resource.dhcp:
+            resource.address = port["fixed_ips"][0]["ip_address"]
+
+        if len(port["fixed_ips"]) > 0:
+            subnet = self.get_subnet(project_id, subnet_id=port["fixed_ips"][0]["subnet_id"])
+            resource.subnet = subnet["name"]
+        else:
+            resource.subnet = ""
+
+        resource.portsecurity = port["port_security_enabled"]
+        resource.name = port["name"]
+
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        project_id = ctx.get("project_id")
+        network = ctx.get("network")
+        vm = ctx.get("vm")
+        subnet = self.get_subnet_id(project_id, name=resource.subnet)
+        if subnet is None:
+            raise SkipResource("Unable to create host port because the subnet does not exist.")
 
         try:
-            changed = False
-            if "purged" in changes and port is None:
-                if not changes["purged"][1]:  # create the router port
-                    body_value = {'port': {'admin_state_up': True, 'name': resource.name, 'network_id': network_id}}
+            body_value = {'port': {'admin_state_up': True, 'name': resource.name, 'network_id': network["id"]}}
 
-                    if resource.address != "" and not resource.dhcp:
-                        body_value["port"]["fixed_ips"] = [{"subnet_id": subnet_id, "ip_address": resource.address}]
+            if resource.address != "" and not resource.dhcp:
+                body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
 
-                    result = self._client.create_port(body=body_value)
+            if not resource.portsecurity:
+                body_value["port"]["port_security_enabled"] = False
+                body_value["port"]["security_groups"] = None
 
-                    if "port" not in result:
-                        raise Exception("Unable to create port.")
+            result = self._neutron.create_port(body=body_value)
 
-                    port_id = result["port"]["id"]
+            if "port" not in result:
+                raise Exception("Unable to create port.")
 
-                    # attach it to the host
-                    vm.interface_attach(port_id, None, None)
-                    changed = True
+            port_id = result["port"]["id"]
 
-                elif changes["purged"][1] and not changes["purged"][0]:
-                    self._client.delete_port(port["id"])
-                    changed = True
-            else:
-                port = self.get_port(network_id, vm.id)
-                if port is None:
-                    raise SkipResource("Port not found")
+            # attach it to the host
+            vm.interface_attach(port_id, None, None)
+        except novaclient.exceptions.Conflict as e:
+            raise SkipResource("Host is not ready: %s" % str(e), e)
 
-                if "portsecurity" in changes and not changes["portsecurity"][1]:
-                    self._client.update_port(port=port["id"], body={"port": {"port_security_enabled": False,
-                                                                    "security_groups": None}})
+        ctx.set_created()
 
-                    del changes["portsecurity"]
-                    changed = True
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        self._neutron.delete_port(ctx.get("port")["id"])
+        ctx.set_purged()
 
-                if "name" in changes:
-                    self._client.update_port(port=port["id"], body={"port": {"name": resource.name}})
-                    del changes["name"]
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
+        port = ctx.get("port")
 
-                if len(changes) > 0:
-                    # TODO
-                    raise SkipResource("not implemented, %s" % changes)
-                    changed = True
+        try:
+            if "portsecurity" in changes:
+                if not changes["portsecurity"]["desired"]:
+                    self._neutron.update_port(port=port["id"], body={"port": {"port_security_enabled": False,
+                                                                              "security_groups": None}})
+                else:
+                    raise SkipResource("Turning port security on again is not supported.")
+
+                del changes["portsecurity"]
+
+            if "name" in changes:
+                self._neutron.update_port(port=port["id"], body={"port": {"name": resource.name}})
+                del changes["name"]
+
+            if len(changes) > 0:
+                raise SkipResource("not implemented, %s" % changes)
+
         except novaclient.exceptions.Conflict as e:
             raise SkipResource("Host is not ready: %s" % str(e))
 
-        return changed
-
     @cache(timeout=5)
     def facts(self, ctx, resource):
-        """
-            Get facts about this resource
-        """
-        ports = self._client.list_ports(name=resource.name)
+        ports = self._neutron.list_ports(name=resource.name)
 
         if "ports" not in ports:
             return {}
@@ -1418,32 +1242,30 @@ class HostPortHandler(NeutronHandler):
 
 
 @provider("openstack::SecurityGroup", name="openstack")
-class SecurityGroupHandler(NeutronHandler):
+class SecurityGroupHandler(OpenStackHandler):
     @cache(timeout=60)
-    def get_security_group(self, name=None, id=None):
+    def get_security_group(self, name=None, group_id=None):
         """
             Get security group details from openstack
         """
         if name is not None:
-            sgs = self._client.list_security_groups(name=name)
-        elif id is not None:
-            sgs = self._client.list_security_groups(id=id)
+            sgs = self._neutron.list_security_groups(name=name)
+        elif group_id is not None:
+            sgs = self._neutron.list_security_groups(id=group_id)
 
         if len(sgs["security_groups"]) == 0:
             return None
 
         return sgs["security_groups"][0]
 
-    def check_resource(self, ctx, resource: SecurityGroup) -> SecurityGroup:
-        current = resource.clone()
+    def read_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
         sg = self.get_security_group(name=resource.name)
+        ctx.set("sg", sg)
         if sg is None:
-            current.purged = True
-            current.rules = []
-            return current
+            raise ResourcePurged()
 
-        current.description = sg["description"]
-        current.rules = []
+        resource.description = sg["description"]
+        resource.rules = []
         for rule in sg["security_group_rules"]:
             if rule["ethertype"] != "IPv4":
                 continue
@@ -1468,9 +1290,7 @@ class SecurityGroupHandler(NeutronHandler):
             current_rule["port_range_min"] = rule["port_range_min"]
             current_rule["port_range_max"] = rule["port_range_max"]
 
-            current.rules.append(current_rule)
-
-        return current
+            resource.rules.append(current_rule)
 
     def _compare_rule(self, old, new):
         old_keys = set([x for x in old.keys() if not x.startswith("__")])
@@ -1485,13 +1305,13 @@ class SecurityGroupHandler(NeutronHandler):
 
         return True
 
-    def _update_rules(self, group_id, resource, changes):
+    def _update_rules(self, group_id, resource, current_rules, desired_rules):
         # # Update rules. First add all new rules, than remove unused rules
-        old_rules = list(changes["rules"][0])
-        new_rules = list(changes["rules"][1])
+        old_rules = list(current_rules)
+        new_rules = list(desired_rules)
 
-        for new_rule in changes["rules"][1]:
-            for old_rule in changes["rules"][0]:
+        for new_rule in desired_rules:
+            for old_rule in current_rules:
                 if self._compare_rule(old_rule, new_rule):
                     old_rules.remove(old_rule)
                     new_rules.remove(new_rule)
@@ -1502,7 +1322,7 @@ class SecurityGroupHandler(NeutronHandler):
             if "remote_group" in new_rule:
                 if new_rule["remote_group"] is not None:
                     # lookup the id of the group
-                    groups = self._client.list_security_groups(name=new_rule["remote_group"])["security_groups"]
+                    groups = self._neutron.list_security_groups(name=new_rule["remote_group"])["security_groups"]
                     if len(groups) == 0:
                         # TODO: log skip rule
                         continue  # Do not update this rule
@@ -1519,31 +1339,27 @@ class SecurityGroupHandler(NeutronHandler):
                 new_rule["protocol"] = None
 
             try:
-                self._client.create_security_group_rule({'security_group_rule': new_rule})
+                self._neutron.create_security_group_rule({'security_group_rule': new_rule})
             except exceptions.Conflict:
                 LOGGER.exception("Rule conflict for rule %s", new_rule)
                 raise
 
         for old_rule in old_rules:
             try:
-                self._client.delete_security_group_rule(old_rule["__id"])
+                self._neutron.delete_security_group_rule(old_rule["__id"])
             except exceptions.NotFound:
                 # TODO: handle this
                 pass
 
-    def list_changes(self, ctx, resource):
-        """
-            List the changes that are required to the security group
-        """
-        current = self.check_resource(ctx, resource)
-        changes = self._diff(current, resource)
+    def _diff(self, current, desired):
+        changes = self._diff(current, desired)
 
         if "rules" in changes:
-            old_rules = list(changes["rules"][0])
-            new_rules = list(changes["rules"][1])
+            old_rules = list(changes["rules"]["current"])
+            new_rules = list(changes["rules"]["desired"])
 
-            for new_rule in changes["rules"][1]:
-                for old_rule in changes["rules"][0]:
+            for new_rule in changes["rules"]["desired"]:
+                for old_rule in changes["rules"]["current"]:
                     if self._compare_rule(old_rule, new_rule):
                         old_rules.remove(old_rule)
                         new_rules.remove(new_rule)
@@ -1554,50 +1370,38 @@ class SecurityGroupHandler(NeutronHandler):
 
         return changes
 
-    def do_changes(self, ctx, resource: SecurityGroup, changes) -> SecurityGroup:
-        """
-            Enforce the changes
-        """
-        sg_id = None
-        if "purged" in changes:
-            changed = True
-            if changes["purged"][0] == True:  # create
-                sg = self._client.create_security_group({"security_group": {"name": resource.name,
-                                                                            "description": resource.description}})
-                sg_id = sg["security_group"]["id"]
-            else:  # purge
-                sg = self.get_security_group(name=resource.name)
-                if sg is not None:
-                    self._client.delete_security_group(sg["id"])
-                    sg_id = sg["id"]
+    def create_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
+        sg = self._neutron.create_security_group({"security_group": {"name": resource.name,
+                                                                     "description": resource.description}})
+        self._update_rules(sg["security_group"]["id"], resource, [], resource.rules)
+        ctx.set_created()
 
-        elif len(changes) > 0:
-            sg = self.get_security_group(name=resource.name)
-            if sg is None:
-                raise Exception("Unable to modify unexisting security group")
+    def delete_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
+        sg = ctx.get("sg")
+        self._neutron.delete_security_group(sg["id"])
+        ctx.set_purged()
 
-            self._client.update_security_group(sg["id"], {"security_group": {"name": resource.name,
-                                                                             "description": resource.description}})
-            sg_id = sg["id"]
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: SecurityGroup) -> None:
+        sg = ctx.get("sg")
+        if "name" in changes or "description" in changes:
+            self._neutron.update_security_group(sg["id"], {"security_group": {"name": resource.name,
+                                                                              "description": resource.description}})
+            ctx.set_updated()
 
         if "rules" in changes:
-            self._update_rules(sg_id, resource, changes)
-
-        return changed
+            self._update_rules(sg["id"], resource, changes["rules"]["current"], changes["rules"]["desired"])
+            ctx.set_updated()
 
     @cache(timeout=5)
     def facts(self, ctx, resource):
-        """
-            Discover facts about this securitygroup
-        """
         return {}
 
 
 @provider("openstack::FloatingIP", name="openstack")
-class FloatingIPHandler(NeutronHandler):
+class FloatingIPHandler(OpenStackHandler):
     @cache(timeout=10)
     def get_port_id(self, name):
-        ports = self._client.list_ports(name=name)["ports"]
+        ports = self._neutron.list_ports(name=name)["ports"]
         if len(ports) == 0:
             return None
 
@@ -1608,66 +1412,62 @@ class FloatingIPHandler(NeutronHandler):
 
     @cache(timeout=10)
     def get_floating_ip(self, port_id):
-        fip = self._client.list_floatingips(port_id=port_id)["floatingips"]
+        fip = self._neutron.list_floatingips(port_id=port_id)["floatingips"]
         if len(fip) == 0:
             return None
 
         else:
             return fip[0]["id"]
 
-    def check_resource(self, ctx, resource: FloatingIP) -> FloatingIP:
-        current = resource.clone()
+    def read_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
         port_id = self.get_port_id(resource.port)
         fip = self.get_floating_ip(port_id)
+
         if fip is None:
-            current.purged = True
+            raise ResourcePurged()
 
-        else:
-            current.purged = False
-
-        return current
+        resource.purged = False
+        ctx.set("port_id", port_id)
+        ctx.set("fip", fip)
 
     def _find_available_fips(self, project_id, network_id):
         available_fips = []
-        floating_ips = self._client.list_floatingips(floating_network_id=network_id, tenant_id=project_id)["floatingips"]
+        floating_ips = self._neutron.list_floatingips(floating_network_id=network_id, tenant_id=project_id)["floatingips"]
         for fip in floating_ips:
             if fip["port_id"] is None:
                 available_fips.append(fip)
 
         return available_fips
 
-    def do_changes(self, ctx, resource: FloatingIP, changes) -> FloatingIP:
-        changed = False
-
-        project_id = self.get_project_id(resource, resource.project)
+    def create_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
         network_id = self.get_network_id(None, resource.external_network)
-        port_id = self.get_port_id(resource.port)
+        project_id = ctx.get("project_id")
+        port_id = ctx.get("port_id")
+        if network_id is None:
+            raise SkipResource("Unable to finx external network")
 
-        if "purged" in changes:
-            if changes["purged"][0]:  # create
-                available_fips = self._find_available_fips(project_id, network_id)
-                if len(available_fips) > 0:
-                    fip_id = available_fips[0]["id"]
-                    self._client.update_floatingip(fip_id, {"floatingip": {"port_id": port_id, "description": resource.name}})
+        available_fips = self._find_available_fips(project_id, network_id)
+        if len(available_fips) > 0:
+            fip_id = available_fips[0]["id"]
+            self._neutron.update_floatingip(fip_id, {"floatingip": {"port_id": port_id, "description": resource.name}})
 
-                else:
-                    self._client.create_floatingip({"floatingip": {"port_id": port_id, "floating_network_id": network_id,
-                                                                   "description": resource.name}})
+        else:
+            self._neutron.create_floatingip({"floatingip": {"port_id": port_id, "floating_network_id": network_id,
+                                                            "description": resource.name}})
 
-                changed = True
+        ctx.set_created()
 
-            else:
-                # disassociate and purge
-                fip_id = self.get_floating_ip(port_id)
-                if fip_id is not None:
-                    self._client.delete_floatingip(fip_id)
+    def delete_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
+        self._neutron.delete_floatingip(ctx.get("fip")["id"])
+        ctx.set_purged()
 
-        return changed
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: FloatingIP) -> None:
+        raise SkipResource("Updating a floating ip is not supported")
 
     @cache(timeout=5)
     def facts(self, ctx, resource):
         port_id = self.get_port_id(resource.port)
-        fip = self._client.list_floatingips(port_id=port_id)["floatingips"]
+        fip = self._neutron.list_floatingips(port_id=port_id)["floatingips"]
         if len(fip) == 0:
             return {}
 
@@ -1775,7 +1575,9 @@ class UserHandler(OpenStackHandler):
 
 @provider("openstack::Role", name="openstack")
 class RoleHandler(OpenStackHandler):
-    """ creates roles and user, project, role assocations """
+    """
+        creates roles and user, project, role assocations
+    """
     def read_resource(self, ctx, resource):
         # get the role
         role = None
@@ -1855,7 +1657,9 @@ class ServiceHandler(OpenStackHandler):
 
 @provider("openstack::EndPoint", name="openstack")
 class EndpointHandler(OpenStackHandler):
+
     types = {"admin": "admin_url", "internal": "internal_url", "public": "public_url"}
+
     def read_resource(self, ctx, resource):
         service = None
         for s in self._keystone.services.list():

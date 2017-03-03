@@ -31,9 +31,7 @@ def test_net(project, neutron):
     n = openstack::Network(provider=p, name="test_net", project=project)
             """)
 
-        n1 = project.get_resource("openstack::Network", name="test_net")
-        ctx = project.deploy(n1)
-        assert ctx.status == inmanta.const.ResourceState.deployed
+        n1 = project.deploy_resource("openstack::Network", name="test_net")
 
         networks = neutron.list_networks(name=n1.name)["networks"]
         assert len(networks) == 1
@@ -67,8 +65,55 @@ def test_net(project, neutron):
                 neutron.delete_network(network["id"])
 
 
-#     print(ctx._changes)
-#     for l in ctx.logs:
-#         print(l._data)
-#         if "traceback" in l._data["kwargs"]:
-#             print(l._data["kwargs"]["traceback"])
+def test_subnet(project, neutron):
+    name = "inmanta_unit_test"
+    try:
+        project.compile("""
+    import unittest
+    import openstack
+
+    tenant = std::get_env("OS_PROJECT_NAME")
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="%(name)s", project=project)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
+                               network_address="10.255.255.0/24")
+            """ % {"name": name})
+
+        net = project.deploy_resource("openstack::Network")
+        subnet = project.deploy_resource("openstack::Subnet")
+
+        assert len(neutron.list_subnets(name=subnet.name)["subnets"]) == 1
+        assert len(neutron.list_networks(name=net.name)["networks"]) == 1
+
+        project.compile("""
+    import unittest
+    import openstack
+
+    tenant = std::get_env("OS_PROJECT_NAME")
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="%(name)s", project=project, purged=true)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
+                               network_address="10.255.255.0/24", purged=true)
+            """ % {"name": name})
+
+        net = project.deploy_resource("openstack::Network")
+        subnet = project.deploy_resource("openstack::Subnet")
+
+        assert len(neutron.list_subnets(name=subnet.name)["subnets"]) == 0
+        assert len(neutron.list_networks(name=net.name)["networks"]) == 0
+
+    finally:
+        # cleanup
+        networks = neutron.list_subnets(name=name)["subnets"]
+        if len(networks) > 0:
+            for network in networks:
+                neutron.delete_subnet(network["id"])
+
+        networks = neutron.list_networks(name=name)["networks"]
+        if len(networks) > 0:
+            for network in networks:
+                neutron.delete_network(network["id"])
