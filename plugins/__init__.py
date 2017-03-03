@@ -863,19 +863,28 @@ class RouterHandler(OpenStackHandler):
 
         result = self._neutron.create_router({"router": {"name": resource.name, "tenant_id": project_id}})
         router_id = result["router"]["id"]
-        ctx.info("Created router with id %(id)s", router_id)
+        ctx.info("Created router with id %(id)s", id=router_id)
         ctx.set_created()
 
         if len(resource.subnets) > 0:
             self._update_subnets(router_id, [], resource.subnets)
-            ctx.info("Added subnets to router with id %(id)s", router_id)
+            ctx.info("Added subnets to router with id %(id)s", id=router_id)
 
         if resource.gateway is not None and resource.gateway != "":
             self._set_gateway(router_id, resource.gateway)
-            ctx.info("Set gateway of router with id %(id)s", router_id)
+            ctx.info("Set gateway of router with id %(id)s", id=router_id)
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        self._neutron.delete_router(ctx.get("neutron")["id"])
+        router_id = ctx.get("neutron")["id"]
+
+        ports = self._neutron.list_ports(device_id=router_id)["ports"]
+        for port in ports:
+            if port["device_owner"] == "network:router_interface":
+                ctx.info("Detatch interface with port id %(port)s from router %(router_id)s",
+                         port=port["id"], router_id=router_id)
+                self._neutron.remove_interface_router(router=router_id, body={"port_id": port["id"]})
+
+        self._neutron.delete_router(router_id)
         ctx.set_purged()
 
     def _update_subnets(self, router_id, current, desired):
@@ -903,11 +912,11 @@ class RouterHandler(OpenStackHandler):
             self._neutron.remove_interface_router(router=router_id, body={"subnet_id": subnet_id})
 
     def _set_gateway(self, router_id, network):
-        network_id = self.get_network(None, name=network)
-        if network_id is None:
+        network = self.get_network(None, name=network)
+        if network is None:
             raise Exception("Unable to set router gateway because the gateway network that does not exist.")
 
-        self._neutron.add_gateway_router(router_id, {'network_id': network_id})
+        self._neutron.add_gateway_router(router_id, {'network_id': network["id"]})
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         router_id = ctx.get("neutron")["id"]
@@ -917,12 +926,12 @@ class RouterHandler(OpenStackHandler):
 
         if "subnets" in changes:
             self._update_subnets(router_id, changes["subnets"]["current"], changes["subnets"]["desired"])
-            ctx.info("Modified subnets of router with id %(id)s", router_id)
+            ctx.info("Modified subnets of router with id %(id)s", id=router_id)
             ctx.set_updated()
 
         if "gateway" in changes:
             self._set_gateway(router_id, resource.gateway)
-            ctx.info("Modified gateway of router with id %(id)s", router_id)
+            ctx.info("Modified gateway of router with id %(id)s", id=router_id)
             ctx.set_updated()
 
         if "routes" in changes:
@@ -1038,7 +1047,7 @@ class RouterPortHandler(OpenStackHandler):
             if neutron_version["device_id"] == "":
                 resource.router = ""
             else:
-                router = self.get_router(project_id, router_id=neutron_version["device_id"])
+                router = self.get_router(None, router_id=neutron_version["device_id"])
                 resource.router = router["name"]
 
             # Network stuff
