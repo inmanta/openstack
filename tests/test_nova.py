@@ -15,12 +15,9 @@
 
     Contact: code@inmanta.com
 """
-
-import os
 import time
 
 import inmanta
-import pytest
 
 
 def print_ctx(ctx):
@@ -50,6 +47,9 @@ def test_boot_vm(project, keystone, nova, neutron):
     image = images[0].id
 
     flavor = find_small_flavor(nova).name
+    key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
+           "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
+           "bart@wolf.inmanta.com")
 
     project.add_fact("openstack::Host[dnetcloud,name=%s]" % name, "ip_address", "10.1.1.1")
     project.compile("""
@@ -60,14 +60,14 @@ import ssh
 tenant = std::get_env("OS_PROJECT_NAME")
 p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                         password=std::get_env("OS_PASSWORD"), tenant=tenant)
-key = ssh::Key(name="%(name)s", public_key="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== bart@wolf.inmanta.com")
+key = ssh::Key(name="%(name)s", public_key="%(key)s")
 project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
 net = openstack::Network(provider=p, project=project, name="%(name)s")
 subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="%(name)s",
                            network_address="10.255.255.0/24")
 vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=std::linux,
                      image="%(image)s", flavor="%(flavor)s", user_data="", subnet=subnet)
-        """ % {"name": name, "image": image, "flavor": flavor})
+        """ % {"name": name, "image": image, "flavor": flavor, "key": key})
 
     n1 = project.get_resource("openstack::Network", name=name)
     ctx = project.deploy(n1)
@@ -93,7 +93,7 @@ import ssh
 tenant = std::get_env("OS_PROJECT_NAME")
 p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                         password=std::get_env("OS_PASSWORD"), tenant=tenant)
-key = ssh::Key(name="%(name)s", public_key="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== bart@wolf.inmanta.com")
+key = ssh::Key(name="%(name)s", public_key="%(key)s")
 
 project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
 net = openstack::Network(provider=p, project=project, name="%(name)s", purged=true)
@@ -101,7 +101,7 @@ subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, 
                            network_address="10.255.255.0/24", purged=true)
 vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=std::linux,
                      image="%(image)s", flavor="%(flavor)s", user_data="", subnet=subnet, purged=true)
-        """ % {"name": name, "image": image, "flavor": flavor})
+        """ % {"name": name, "image": image, "flavor": flavor, "key": key})
 
     h1 = project.get_resource("openstack::Host", name=name)
     ctx = project.deploy(h1)
@@ -146,4 +146,3 @@ vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s",
     if len(networks) > 0:
         for network in networks:
             neutron.delete_network(network["id"])
-

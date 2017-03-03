@@ -283,4 +283,3 @@ def test_service_endpoints(project, keystone):
             service.delete()
         except Exception:
             pass
-
