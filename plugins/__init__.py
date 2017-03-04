@@ -476,23 +476,22 @@ class OpenStackHandler(CRUDHandler):
             Retrieve the network id based on the name of the network
         """
         query = {}
-        if project_id is not None:
+        if project_id is not None and network_id is None:
             query["tenant_id"] = project_id
 
         if name is not None:
             query["name"] = name
         elif network_id is not None:
-            query["network_id"] = network_id
+            query["id"] = network_id
         else:
             raise Exception("Either a name or an id needs to be provided.")
 
         networks = self._neutron.list_networks(**query)
-
         if len(networks["networks"]) == 0:
             return None
 
         elif len(networks["networks"]) > 1:
-            raise Exception("Found more than one network with name %s for project %s" % (name, project_id))
+            raise Exception("Found more than one network with name %s/id %s for project %s" % (name, network_id, project_id))
 
         else:
             return networks["networks"][0]
@@ -515,18 +514,24 @@ class OpenStackHandler(CRUDHandler):
             raise Exception("Found more than one subnet with name %s for project %s" % (name, project_id))
 
         else:
-            return subnets["subnets"]
+            return subnets["subnets"][0]
 
-    def get_router(self, project_id, name=None, router_id=None):
+    def get_router(self, project_id=None, name=None, router_id=None):
         """
             Retrieve the router id based on the name of the network
         """
+        query = {}
+        if project_id is not None:
+            query["tenant_id"] = project_id
+
         if name is not None:
-            routers = self._neutron.list_routers(tenant_id=project_id, name=name)
+            query["name"] = name
         elif router_id is not None:
-            routers = self._neutron.list_routers(tenant_id=project_id, id=router_id)
+            query["id"] = router_id
         else:
             raise Exception("Either a name or an id needs to be provided.")
+
+        routers = self._neutron.list_routers(**query)
 
         if len(routers["routers"]) == 0:
             return None
@@ -535,7 +540,7 @@ class OpenStackHandler(CRUDHandler):
             raise Exception("Found more than one router with name %s for project %s" % (name, project_id))
 
         else:
-            return routers["routers"]
+            return routers["routers"][0]
 
     def get_host_id(self, project_id, name):
         return self.get_host(project_id, name).id
@@ -1047,7 +1052,7 @@ class RouterPortHandler(OpenStackHandler):
             if neutron_version["device_id"] == "":
                 resource.router = ""
             else:
-                router = self.get_router(None, router_id=neutron_version["device_id"])
+                router = self.get_router(router_id=neutron_version["device_id"])
                 resource.router = router["name"]
 
             # Network stuff
@@ -1104,7 +1109,15 @@ class RouterPortHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        self._neutron.delete_port(ctx.get("neutron")["id"])
+        port = ctx.get("neutron")
+
+        if port["device_owner"] == "network:router_interface":
+            ctx.info("Detatch interface with port id %(port)s from router %(router_id)s",
+                     port=port["id"], router_id=port["device_id"])
+            self._neutron.remove_interface_router(router=port["device_id"], body={"port_id": port["id"]})
+        else:
+            self._neutron.delete_port(port["id"])
+
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
@@ -1591,7 +1604,6 @@ class RoleHandler(OpenStackHandler):
         # get the role
         role = None
         try:
-            self._keystone.users.find(name="bartvb")
             role = self._keystone.roles.find(name=resource.role)
         except NotFound:
             pass
