@@ -16,7 +16,6 @@
     Contact: code@inmanta.com
 """
 import inmanta
-import time
 
 
 def test_net(project, neutron):
