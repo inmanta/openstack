@@ -48,7 +48,6 @@ entity Project extends OpenStackResource:
     string name
     bool enabled
     string description
-    bool manage=true
 end
 index Project(provider, name)
 Project projects [0:] -- [1] Provider provider

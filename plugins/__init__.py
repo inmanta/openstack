@@ -233,8 +233,8 @@ class SecurityGroup(OpenstackResource):
                 json_rule["port_range_max"] = rule.port
 
             else:
-                json_rule["port_range_min"] = rule.port
-                json_rule["port_range_max"] = rule.port
+                json_rule["port_range_min"] = rule.port_min
+                json_rule["port_range_max"] = rule.port_max
 
             if json_rule["port_range_min"] == 0:
                 json_rule["port_range_min"] = None
@@ -253,6 +253,7 @@ class SecurityGroup(OpenstackResource):
                 pass
 
             rules.append(json_rule)
+
         return rules
 
 
@@ -272,7 +273,7 @@ class FloatingIP(OpenstackResource):
         return fip.external_network.name
 
 
-class KeystoneResource(PurgeableResource):
+class KeystoneResource(PurgeableResource, ManagedResource):
     fields = ("admin_token", "url", "admin_user", "admin_password", "admin_tenant", "auth_url")
 
     @staticmethod
@@ -305,7 +306,7 @@ class Project(KeystoneResource):
     """
         This class represents a project in keystone
     """
-    fields = ("name", "enabled", "description", "manage")
+    fields = ("name", "enabled", "description")
 
     @staticmethod
     def get_project(exporter, resource):
@@ -395,28 +396,41 @@ def openstack_dependencies(config_model, resource_model):
 
         # depend on the attached subnets
         for subnet_name in router.subnets:
-            router.requires.add(subnets[subnet_name])
+            if subnet_name in subnets:
+                router.requires.add(subnets[subnet_name])
 
     for subnet in subnets.values():
-        subnet.requires.add(projects[subnet.model.project.name])
+        if subnet.model.project.name in projects:
+            subnet.requires.add(projects[subnet.model.project.name])
 
         # also require the network it is attached to
-        subnet.requires.add(networks[subnet.model.network.name])
+        if subnet.model.network.name in networks:
+            subnet.requires.add(networks[subnet.model.network.name])
 
     for vm in vms.values():
-        vm.requires.add(projects[vm.model.project.name])
+        if vm.model.project.name in projects:
+            vm.requires.add(projects[vm.model.project.name])
 
         for port in vm.ports:
-            vm.requires.add(subnets[port["network"]])
+            if port["network"] in subnets:
+                vm.requires.add(subnets[port["network"]])
 
     for port in ports.values():
-        port.requires.add(projects[port.model.project.name])
-        port.requires.add(subnets[port.network])
-        port.requires.add(vms[port.host])
+        if port.model.project.name in projects:
+            port.requires.add(projects[port.model.project.name])
+
+        if port.network in projects:
+            port.requires.add(subnets[port.network])
+
+        if port.host in vms:
+            port.requires.add(vms[port.host])
 
     for fip in fips.values():
-        fip.requires.add(networks[fip.external_network])
-        fip.requires.add(ports[fip.port])
+        if fip.external_network in networks:
+            fip.requires.add(networks[fip.external_network])
+
+        if fip.port in ports:
+            fip.requires.add(ports[fip.port])
 
 
 CRED_TIMEOUT = 600
@@ -575,6 +589,22 @@ class OpenStackHandler(CRUDHandler):
         else:
             return vms[0]
 
+    def get_security_group(self, ctx, name=None, group_id=None):
+        """
+            Get security group details from openstack
+        """
+        if name is not None:
+            sgs = self._neutron.list_security_groups(name=name)
+        elif group_id is not None:
+            sgs = self._neutron.list_security_groups(id=group_id)
+
+        if len(sgs["security_groups"]) == 0:
+            return None
+        elif len(sgs["security_groups"]) > 1:
+            ctx.warning("Multiple security groups with name %(name)s exist.", name=name, groups=sgs["security_groups"])
+
+        return sgs["security_groups"][0]
+
 
 @provider("openstack::Host", name="openstack")
 class HostHandler(OpenStackHandler):
@@ -617,21 +647,6 @@ class HostHandler(OpenStackHandler):
 
         return None
 
-    @cache(timeout=60)
-    def get_security_group(self, name=None, group_id=None):
-        """
-            Get security group details from openstack
-        """
-        if name is not None:
-            sgs = self._neutron.list_security_groups(name=name)
-        elif group_id is not None:
-            sgs = self._neutron.list_security_groups(id=group_id)
-
-        if len(sgs["security_groups"]) == 0:
-            return None
-
-        return sgs["security_groups"][0]
-
     def _create_nic_config(self, port):
         nic = {}
         port_id = self._port_id(port["name"])
@@ -654,10 +669,10 @@ class HostHandler(OpenStackHandler):
 
         return [self._create_nic_config(p) for p in sort] + [self._create_nic_config(p) for p in no_sort]
 
-    def _build_sg_list(self, security_groups):
+    def _build_sg_list(self, ctx, security_groups):
         sg_list = []
         for group in security_groups:
-            sg = self.get_security_group(name=group)
+            sg = self.get_security_group(ctx, name=group)
             if sg is not None:
                 sg_list.append(sg["name"])
         return sg_list
@@ -695,7 +710,7 @@ class HostHandler(OpenStackHandler):
         flavor = self._nova.flavors.find(name=resource.flavor)
         nics = self._build_nic_list(resource.ports)
         self._nova.servers.create(resource.name, flavor=flavor.id, userdata=resource.user_data, nics=nics,
-                                  security_groups=self._build_sg_list(resource.security_groups),
+                                  security_groups=self._build_sg_list(ctx, resource.security_groups),
                                   image=resource.image, key_name=resource.key_name)
         ctx.set_created()
 
@@ -1262,33 +1277,14 @@ class HostPortHandler(OpenStackHandler):
         port = filtered_list[0]
         return port
 
+import pprint
+from pprint import pprint
 
 @provider("openstack::SecurityGroup", name="openstack")
 class SecurityGroupHandler(OpenStackHandler):
-    @cache(timeout=60)
-    def get_security_group(self, name=None, group_id=None):
-        """
-            Get security group details from openstack
-        """
-        if name is not None:
-            sgs = self._neutron.list_security_groups(name=name)
-        elif group_id is not None:
-            sgs = self._neutron.list_security_groups(id=group_id)
-
-        if len(sgs["security_groups"]) == 0:
-            return None
-
-        return sgs["security_groups"][0]
-
-    def read_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
-        sg = self.get_security_group(name=resource.name)
-        ctx.set("sg", sg)
-        if sg is None:
-            raise ResourcePurged()
-
-        resource.description = sg["description"]
-        resource.rules = []
-        for rule in sg["security_group_rules"]:
+    def _build_current_rules(self, ctx, security_group):
+        rules = []
+        for rule in security_group["security_group_rules"]:
             if rule["ethertype"] != "IPv4":
                 continue
 
@@ -1302,7 +1298,7 @@ class SecurityGroupHandler(OpenStackHandler):
                 current_rule["remote_ip_prefix"] = rule["remote_ip_prefix"]
 
             elif rule["remote_group_id"] is not None:
-                rgi = self.get_security_group(id=rule["remote_group_id"])
+                rgi = self.get_security_group(ctx, group_id=rule["remote_group_id"])
                 current_rule["remote_group"] = rgi["name"]
 
             else:
@@ -1312,7 +1308,20 @@ class SecurityGroupHandler(OpenStackHandler):
             current_rule["port_range_min"] = rule["port_range_min"]
             current_rule["port_range_max"] = rule["port_range_max"]
 
-            resource.rules.append(current_rule)
+            rules.append(current_rule)
+
+        return rules
+
+    def read_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
+        sg = self.get_security_group(ctx, name=resource.name)
+
+        ctx.set("sg", sg)
+        if sg is None:
+            raise ResourcePurged()
+
+        resource.purged = False
+        resource.description = sg["description"]
+        resource.rules = self._build_current_rules(ctx, sg)
 
     def _compare_rule(self, old, new):
         old_keys = set([x for x in old.keys() if not x.startswith("__")])
@@ -1327,9 +1336,29 @@ class SecurityGroupHandler(OpenStackHandler):
 
         return True
 
+    def _diff(self, current, desired):
+        changes = OpenStackHandler._diff(self, current, desired)
+
+        if "rules" in changes:
+            old_rules = list(changes["rules"]["current"])
+            new_rules = list(changes["rules"]["desired"])
+
+            for new_rule in changes["rules"]["desired"]:
+                for old_rule in changes["rules"]["current"]:
+                    if self._compare_rule(old_rule, new_rule):
+                        old_rules.remove(old_rule)
+                        new_rules.remove(new_rule)
+                        break
+
+            if len(old_rules) == 0 and len(new_rules) == 0:
+                del changes["rules"]
+
+        return changes
+
     def _update_rules(self, group_id, resource, current_rules, desired_rules):
         # # Update rules. First add all new rules, than remove unused rules
         old_rules = list(current_rules)
+        # new_rules = [dict(x) for x in desired_rules]
         new_rules = list(desired_rules)
 
         for new_rule in desired_rules:
@@ -1373,29 +1402,11 @@ class SecurityGroupHandler(OpenStackHandler):
                 # TODO: handle this
                 pass
 
-    def _diff(self, current, desired):
-        changes = self._diff(current, desired)
-
-        if "rules" in changes:
-            old_rules = list(changes["rules"]["current"])
-            new_rules = list(changes["rules"]["desired"])
-
-            for new_rule in changes["rules"]["desired"]:
-                for old_rule in changes["rules"]["current"]:
-                    if self._compare_rule(old_rule, new_rule):
-                        old_rules.remove(old_rule)
-                        new_rules.remove(new_rule)
-                        break
-
-            if len(old_rules) == 0 and len(new_rules) == 0:
-                del changes["rules"]
-
-        return changes
-
     def create_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
         sg = self._neutron.create_security_group({"security_group": {"name": resource.name,
                                                                      "description": resource.description}})
-        self._update_rules(sg["security_group"]["id"], resource, [], resource.rules)
+        current_rules = self._build_current_rules(ctx, sg["security_group"])
+        self._update_rules(sg["security_group"]["id"], resource, current_rules, resource.rules)
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
@@ -1443,14 +1454,14 @@ class FloatingIPHandler(OpenStackHandler):
 
     def read_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
         port_id = self.get_port_id(resource.port)
+        ctx.set("port_id", port_id)
         fip = self.get_floating_ip(port_id)
+        ctx.set("fip", fip)
 
         if fip is None:
             raise ResourcePurged()
 
         resource.purged = False
-        ctx.set("port_id", port_id)
-        ctx.set("fip", fip)
 
     def _find_available_fips(self, project_id, network_id):
         available_fips = []
@@ -1462,8 +1473,12 @@ class FloatingIPHandler(OpenStackHandler):
         return available_fips
 
     def create_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
-        network_id = self.get_network_id(None, resource.external_network)
-        project_id = ctx.get("project_id")
+        network_id = self.get_network(None, resource.external_network)["id"]
+        project_id = self.get_project_id(resource, resource.project)
+        if project_id is None:
+            raise SkipResource("Cannot create a floating ip when project id is not yet known.")
+        ctx.set("project_id", project_id)
+
         port_id = ctx.get("port_id")
         if network_id is None:
             raise SkipResource("Unable to finx external network")
@@ -1606,13 +1621,18 @@ class RoleHandler(OpenStackHandler):
         try:
             role = self._keystone.roles.find(name=resource.role)
         except NotFound:
+            ctx.info("Role %(role)s does not exit yet.", role=resource.role)
             pass
 
         try:
             user = self._keystone.users.find(name=resource.user)
+        except NotFound:
+            raise SkipResource("The user does not exist.")
+
+        try:
             project = self._keystone.projects.find(name=resource.project)
         except NotFound:
-            raise SkipResource("Either the user or project does not exist.")
+            raise SkipResource("The project does not exist.")
 
         try:
             self._keystone.roles.check(role=role, user=user, project=project)
