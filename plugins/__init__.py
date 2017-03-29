@@ -20,7 +20,7 @@ import os
 import traceback
 import logging
 
-from inmanta.execute.proxy import UnknownException
+from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources
 from inmanta.agent import handler
@@ -74,8 +74,8 @@ class OpenstackResource(PurgeableResource, ManagedResource):
         return resource.provider.connection_url
 
 
-@resource("openstack::Host", agent="provider.name", id_attribute="name")
-class Host(OpenstackResource):
+@resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
+class VirtualMachine(OpenstackResource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
@@ -97,7 +97,7 @@ class Host(OpenstackResource):
         """
         try:
             ua = vm.user_data
-        except UnknownException:
+        except proxy.UnknownException:
             ua = ""
         return ua
 
@@ -108,7 +108,7 @@ class Host(OpenstackResource):
             port = {"name": p.name, "address": None, "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
             try:
                 port["address"] = p.address
-            except UnknownException:
+            except proxy.UnknownException:
                 pass
             ports.append(port)
 
@@ -198,7 +198,7 @@ class HostPort(OpenstackResource):
     def get_address(exporter, port):
         try:
             return port.address
-        except UnknownException:
+        except proxy.UnknownException:
             return ""
 
     @staticmethod
@@ -211,7 +211,7 @@ class HostPort(OpenstackResource):
 
     @staticmethod
     def get_host(_, port):
-        return port.host.name
+        return port.vm.name
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
@@ -376,7 +376,7 @@ def openstack_dependencies(config_model, resource_model):
         elif res.id.entity_type == "openstack::Subnet":
             subnets[res.name] = res
 
-        elif res.id.entity_type == "openstack::Host":
+        elif res.id.entity_type == "openstack::VirtualMachine":
             vms[res.name] = res
 
         elif res.id.entity_type == "openstack::HostPort":
@@ -606,8 +606,8 @@ class OpenStackHandler(CRUDHandler):
         return sgs["security_groups"][0]
 
 
-@provider("openstack::Host", name="openstack")
-class HostHandler(OpenStackHandler):
+@provider("openstack::VirtualMachine", name="openstack")
+class VirtualMachineHandler(OpenStackHandler):
     @cache(timeout=10)
     def get_vm(self, ctx, resource):
         if resource.project == resource.admin_tenant:
@@ -621,6 +621,7 @@ class HostHandler(OpenStackHandler):
                 ctx.exception("Unable to retrieve server list with a scoped login on project %(admin_project)s, "
                               "for project %(project)s. This only works with admin credentials.",
                               admin_project=resource.admin_tenant, project=resource.project, traceback=traceback.format_exc())
+                return None
 
         if len(servers) == 0:
             return None
@@ -690,7 +691,7 @@ class HostHandler(OpenStackHandler):
         """
         server = self.get_vm(ctx, resource)
         if server is None:
-            resource.purged = True
+            raise ResourcePurged()
 
         else:
             resource.purged = False
@@ -861,9 +862,10 @@ class RouterHandler(OpenStackHandler):
             if port["name"] == "" or port["name"] not in resource.ports:
                 for subnet in subnets:
                     try:
-                        subnet_details = self._neutron.show_subnet(subnet["subnet_id"])
-                        if subnet_details["subnet"]["network_id"] != external_net_id:
-                            subnet_list.append(subnet_details["subnet"]["name"])
+                        subnet_details = self._neutron.show_subnet(subnet["subnet_id"])["subnet"]
+                        # skip external networks and neutron networks such as ha networks
+                        if subnet_details["network_id"] != external_net_id and subnet_details["tenant_id"] != "":
+                            subnet_list.append(subnet_details["name"])
 
                     except exceptions.NeutronClientException:
                         pass
@@ -1166,6 +1168,10 @@ class HostPortHandler(OpenStackHandler):
         return None
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        if resource.purged:
+            # Most stuff below here will err eventually
+            return
+
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create  a host port when project id is not yet known.")
@@ -1203,7 +1209,7 @@ class HostPortHandler(OpenStackHandler):
         project_id = ctx.get("project_id")
         network = ctx.get("network")
         vm = ctx.get("vm")
-        subnet = self.get_subnet_id(project_id, name=resource.subnet)
+        subnet = self.get_subnet(project_id, name=resource.subnet)
         if subnet is None:
             raise SkipResource("Unable to create host port because the subnet does not exist.")
 
@@ -1277,8 +1283,6 @@ class HostPortHandler(OpenStackHandler):
         port = filtered_list[0]
         return port
 
-import pprint
-from pprint import pprint
 
 @provider("openstack::SecurityGroup", name="openstack")
 class SecurityGroupHandler(OpenStackHandler):

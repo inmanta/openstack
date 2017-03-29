@@ -346,4 +346,3 @@ openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_mi
     project.deploy_resource("openstack::SecurityGroup")
     sgs = neutron.list_security_groups(name=name)
     assert len(sgs["security_groups"]) == 0
-
