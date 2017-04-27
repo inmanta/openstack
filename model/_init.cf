@@ -17,7 +17,6 @@
 """
 import ip
 import ip::services
-import vm
 import ssh
 
 entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
