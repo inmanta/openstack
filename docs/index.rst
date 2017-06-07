@@ -36,7 +36,7 @@ Creating machines
 
 .. literalinclude:: examples/openstack.snip
     :linenos:
-    :language: ruby
+    :language: inmanta
 
 
 Getting the agent on the machine
@@ -76,13 +76,13 @@ Applied to the example above the main file is reduced to:
 
 .. literalinclude:: examples/openstackclean/main.cf
     :linenos:
-    :language: ruby
+    :language: inmanta
 
 With the following module:
 
 .. literalinclude:: examples/openstackclean/libs/mymodule/model/_init.cf
     :linenos:
-    :language: ruby
+    :language: inmanta
 
 If this were not an example, we would make the following changes:
 
