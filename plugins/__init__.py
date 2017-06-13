@@ -623,6 +623,9 @@ class VirtualMachineHandler(OpenStackHandler):
                               admin_project=resource.admin_tenant, project=resource.project, traceback=traceback.format_exc())
                 return None
 
+        # OS query semantic are not == but "in". So "mon" matches mon and mongo
+        # Filter again to ensure a correct result
+        servers = [x for x in servers if x.name == resource.name]
         if len(servers) == 0:
             return None
 
