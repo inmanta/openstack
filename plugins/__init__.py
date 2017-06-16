@@ -19,6 +19,7 @@
 import os
 import traceback
 import logging
+import time
 
 from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
@@ -192,7 +193,8 @@ class HostPort(OpenstackResource):
     """
         A port in a router
     """
-    fields = ("name", "address", "subnet", "host", "network", "portsecurity", "dhcp", "port_index")
+    fields = ("name", "address", "subnet", "host", "network", "portsecurity", "dhcp", "port_index",
+              "retries", "wait")
 
     @staticmethod
     def get_address(exporter, port):
@@ -219,7 +221,7 @@ class SecurityGroup(OpenstackResource):
     """
         A security group in an OpenStack tenant
     """
-    fields = ("name", "description", "manage_all", "rules")
+    fields = ("name", "description", "manage_all", "rules", "retries", "wait")
 
     @staticmethod
     def get_rules(exporter, group):
@@ -362,6 +364,8 @@ def openstack_dependencies(config_model, resource_model):
     vms = {}
     ports = {}
     fips = {}
+    sgs = {}
+    router_map = {}
 
     for _, res in resource_model.items():
         if res.id.entity_type == "openstack::Project":
@@ -385,6 +389,9 @@ def openstack_dependencies(config_model, resource_model):
         elif res.id.entity_type == "openstack::FloatingIP":
             fips[res.name] = res
 
+        elif res.id.entity_type == "openstack::SecurityGroup":
+            sgs[res.name] = res
+
     # they require the tenant to exist
     for network in networks.values():
         if network.model.project.name in projects:
@@ -398,6 +405,12 @@ def openstack_dependencies(config_model, resource_model):
         for subnet_name in router.subnets:
             if subnet_name in subnets:
                 router.requires.add(subnets[subnet_name])
+
+            # create external/subnet mapping
+            router_map[(router.gateway, subnet_name)] = router
+
+        if router.gateway in networks:
+            router.requires.add(networks[router.gateway])
 
     for subnet in subnets.values():
         if subnet.model.project.name in projects:
@@ -415,6 +428,9 @@ def openstack_dependencies(config_model, resource_model):
             if port["network"] in subnets:
                 vm.requires.add(subnets[port["network"]])
 
+        for sg in vm.security_groups:
+            vm.requires.add(sgs[sg])
+
     for port in ports.values():
         if port.model.project.name in projects:
             port.requires.add(projects[port.model.project.name])
@@ -430,7 +446,13 @@ def openstack_dependencies(config_model, resource_model):
             fip.requires.add(networks[fip.external_network])
 
         if fip.port in ports:
-            fip.requires.add(ports[fip.port])
+            port = ports[fip.port]
+            fip.requires.add(port)
+
+            # find router on which this floating ip is added
+            key = (fip.external_network, port.subnet)
+            if key in router_map:
+                fip.requires.add(router_map[key])
 
 
 CRED_TIMEOUT = 600
@@ -1170,6 +1192,25 @@ class HostPortHandler(OpenStackHandler):
             return ports[0]
         return None
 
+    def wait_for_active(self, ctx, project_id, resource):
+        """
+            A port cannot be attached to a VM when the VM is in the building state. This method waits a limited amount of
+            time for the VM to become active. If it takes to long, this resource will be skipped.
+        """
+        tries = 0
+        max_attempts = resource.retries if resource.retries > 0 else 1
+        while tries < max_attempts:
+            vm = self.get_host(project_id, resource.host)
+            vm_state = getattr(vm, "OS-EXT-STS:vm_state")
+            if vm_state == "active":
+                return vm
+
+            ctx.info("VM for port is not in active state. Waiting and retrying in 5 seconds.")
+            tries += 1
+            time.sleep(resource.wait)
+
+        raise SkipResource("Unable to create host port because vm is not in active state (current %s)" % vm_state)
+
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         if resource.purged:
             # Most stuff below here will err eventually
@@ -1185,9 +1226,10 @@ class HostPortHandler(OpenStackHandler):
             raise SkipResource("Network %s for port %s not found." % (resource.network, resource.name))
         ctx.set("network", network)
 
-        vm = self.get_host(project_id, resource.host)
+        vm = self.wait_for_active(ctx, project_id, resource)
         if vm is None:
             raise SkipResource("Unable to create host port because the vm does not exist.")
+
         ctx.set("vm", vm)
 
         port = self.get_port(network["id"], vm.id)
@@ -1241,7 +1283,9 @@ class HostPortHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        self._neutron.delete_port(ctx.get("port")["id"])
+        port = ctx.get("port")
+        response = self._neutron.delete_port(port["id"])
+        ctx.info("Deleted port %(port_id)s with response %(response)s", port_id=port["id"], response=response)
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
@@ -1418,8 +1462,20 @@ class SecurityGroupHandler(OpenStackHandler):
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
         sg = ctx.get("sg")
-        self._neutron.delete_security_group(sg["id"])
-        ctx.set_purged()
+        tries = 0
+        max_attempts = resource.retries if resource.retries > 0 else 1
+        while tries < max_attempts:
+            try:
+                self._neutron.delete_security_group(sg["id"])
+                ctx.set_purged()
+                return
+            except Exception:
+                ctx.info("Delete failed. Waiting and trying again in 5 seconds.")
+                time.sleep(resource.wait)
+                tries += 1
+
+        raise SkipResource("Deleting the security group failed, probably because it is still in use.")
+
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: SecurityGroup) -> None:
         sg = ctx.get("sg")
@@ -1502,7 +1558,7 @@ class FloatingIPHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
-        self._neutron.delete_floatingip(ctx.get("fip")["id"])
+        self._neutron.delete_floatingip(ctx.get("fip"))
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: FloatingIP) -> None:

@@ -180,11 +180,21 @@ Subnet subnet [0:1] -- [0:] RouterPort routers
 entity HostPort extends Port:
     """
         A port attached to a VM
+
+        :param name: The name of the host port.
+        :param portsecurity: Enable or disable port security (security groups and spoofing filters)
+        :param dhcp: Enable dhcp for this port or not for this port
+        :param port_index: The index of the port. This determines the order of the interfaces on the virtual machine. 0 means no specific order.
+        :param retries: A hostport can only be attached to a VM when it is in an active state. The handler will skip this port when the VM is not ready. To 
+                        speed up deployments, the handler can retry this number of times before skipping the resource.
+        :param wait: The number of seconds to wait between retries.
     """
     string name
     bool portsecurity=true
     bool dhcp=true
     number port_index=0
+    number retries=20
+    number wait=5
 end
 
 implement HostPort using std::none
@@ -248,9 +258,17 @@ Project project [1] -- [0:] Router routers
 typedef direction as string matching self == "ingress" or self == "egress"
 
 entity SecurityGroup extends OpenStackResource:
+    """
+        :param retries: A security group can only be deleted when it is no longer in use. The API confirms the delete of a virtual machine for example, but
+                        it might still be in progress. This results in a failure to delete the security group. To speed up deployments, the handler can 
+                        retry this number of times before skipping the resource.
+        :param wait: The number of seconds to wait between retries.
+    """
     string description=""
     string name
     bool manage_all=true
+    number retries=10
+    number wait=5
 end
 
 index SecurityGroup(project, name)
