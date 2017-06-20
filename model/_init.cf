@@ -337,7 +337,7 @@ implement VirtualMachine using std::none
 
 index VirtualMachine(provider, name)
 
-VirtualMachine eth0_host [1] -- [1] HostPort eth0_port
+VirtualMachine.eth0_port [1] -- HostPort
 VirtualMachine.key_pair [1] -- ssh::Key
 VirtualMachine.project [1] -- Project
 VirtualMachine.provider [1] -- Provider.virtual_machines [0:]
@@ -366,4 +366,3 @@ Host.subnet [0:1] -- Subnet
 Host.key_pair [1] -- ssh::Key
 Host.project [1] -- Project
 Host.provider [1] -- Provider
-
