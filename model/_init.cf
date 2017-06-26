@@ -33,11 +33,17 @@ entity Provider:
     string tenant
     string token=""
     string admin_url=""
+    bool auto_agent=true
 end
 
 index Provider(name)
 
+implementation agentConfig for Provider:
+    std::AgentConfig(autostart=true, agentname=name, uri="local:")
+end
+
 implement Provider using std::none
+implement Provider using agentConfig when auto_agent
 
 ## Keystone config
 entity Project extends OpenStackResource:
