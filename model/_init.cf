@@ -39,7 +39,7 @@ end
 index Provider(name)
 
 implementation agentConfig for Provider:
-    std::AgentConfig(autostart=true, agentname=name, uri="local:")
+    std::AgentConfig(autostart=true, agentname=name, uri="local:", provides=self)
 end
 
 implement Provider using std::none
