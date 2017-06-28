@@ -133,7 +133,7 @@ class Subnet(OpenstackResource):
     """
         This class represent a subnet in neutron
     """
-    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network")
+    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network", "dns_servers")
 
     @staticmethod
     def get_network(_, subnet):
@@ -810,7 +810,7 @@ class NetworkHandler(OpenStackHandler):
             raise ResourcePurged()
 
     def _create_dict(self, resource: Network, project_id):
-        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True}
+        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True, "router:external": resource.external}
 
         if resource.physical_network != "":
             net["provider:physical_network"] = resource.physical_network
@@ -1041,21 +1041,31 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
             body["allocation_pools"] = [{"start": resource.allocation_start, "end": resource.allocation_end}]
 
+        if len(resource.dns_servers) > 0:
+            body["dns_nameservers"] = resource.dns_servers
+
         self._neutron.create_subnet({"subnet": body})
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         neutron = ctx.get("neutron")
         self._neutron.delete_subnet(neutron["id"])
+        ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         neutron = ctx.get("neutron")
+
+        # Send everything that can be updated to the server, the API will figure out what to change
         body = {"subnet": {"enable_dhcp": resource.dhcp}}
         if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
             body["allocation_pools"] = [{"start": resource.allocation_start,
                                          "end": resource.allocation_end}]
 
+        if len(resource.dns_servers) > 0:
+            body["dns_nameservers"] = resource.dns_servers
+
         self._neutron.update_subnet(neutron["id"], body)
+        ctx.set_updated()
 
     @cache(timeout=5)
     def facts(self, ctx, resource):
