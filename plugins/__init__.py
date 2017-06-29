@@ -1257,7 +1257,16 @@ class HostPortHandler(OpenStackHandler):
         else:
             resource.subnet = ""
 
-        resource.portsecurity = port["port_security_enabled"]
+        if "port_security_enabled" in port:
+            resource.portsecurity = port["port_security_enabled"]
+            ctx.set("portsecurity", True)
+        else:
+            ctx.set("portsecurity", False)
+            resource.portsecurity = True
+            if not resource.portsecurity:
+                # Port security is not enabled in the API, but resource wants to disable it.
+                ctx.warning("Ignoring portsecurity is False because extension is not enabled.")
+
         resource.name = port["name"]
 
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
@@ -1274,7 +1283,7 @@ class HostPortHandler(OpenStackHandler):
             if resource.address != "" and not resource.dhcp:
                 body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
 
-            if not resource.portsecurity:
+            if ctx.get("portsecurity") and not resource.portsecurity:
                 body_value["port"]["port_security_enabled"] = False
                 body_value["port"]["security_groups"] = None
 
@@ -1302,7 +1311,7 @@ class HostPortHandler(OpenStackHandler):
         port = ctx.get("port")
 
         try:
-            if "portsecurity" in changes:
+            if ctx.get("portsecurity") and "portsecurity" in changes:
                 if not changes["portsecurity"]["desired"]:
                     self._neutron.update_port(port=port["id"], body={"port": {"port_security_enabled": False,
                                                                               "security_groups": None}})
