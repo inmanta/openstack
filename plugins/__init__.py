@@ -495,7 +495,8 @@ def openstack_dependencies(config_model, resource_model):
                 vm.requires.add(subnets[port["network"]])
 
         for sg in vm.security_groups:
-            vm.requires.add(sgs[sg])
+            if sg in sgs:
+                vm.requires.add(sgs[sg])
 
     for port in ports.values():
         if port.model.project.name in projects:
