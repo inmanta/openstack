@@ -20,6 +20,8 @@ import os
 import traceback
 import logging
 import time
+import datetime
+import math
 
 from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
@@ -27,6 +29,7 @@ from inmanta import resources
 from inmanta.agent import handler
 from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
+from inmanta.plugins import plugin
 
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
@@ -37,6 +40,8 @@ import novaclient.exceptions
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
 from keystoneclient.v3 import client as keystone_client
+
+from glanceclient import client as glance_client
 
 try:
     from keystoneclient.exceptions import NotFound
@@ -49,6 +54,67 @@ loud_logger.propagate = False
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+@plugin
+def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
+    """
+        Search for an image that matches the given operating system. This plugin uses
+        the os_distro and os_version tags of an image and the name and version attributes of
+        the OS parameter.
+
+        If multiple images match, the most recent image is returned.
+    """
+    auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                       password=provider.password, project_name=provider.tenant,
+                       user_domain_id="default", project_domain_id="default")
+    sess = session.Session(auth=auth)
+    client = glance_client.Client("2", session=sess)
+
+    selected = (datetime.datetime(1900, 1, 1), None)
+    for image in client.images.list():
+        # only images that are public
+        if ("image_location" not in image and image["visibility"] == "public") and \
+           (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()):
+            t  = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+            if t > selected[0]:
+                selected = (t, image)
+
+    if selected[1]["id"] is None:
+        raise Exception("No image found for os %s and version %s" % (os.name, os.version))
+
+    return selected[1]["id"]
+
+
+@plugin
+def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number", pinned: "bool"=False) -> "string":
+    """
+        Find the flavor that matches the closest to the resources requested.
+
+        :param vcpus: The number of virtual cpus in the flavor
+        :param ram: The amount of ram in megabyte
+        :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
+    """
+    auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                       password=provider.password, project_name=provider.tenant,
+                       user_domain_id="default", project_domain_id="default")
+    sess = session.Session(auth=auth)
+    client = nova_client.Client("2.1", session=sess)
+
+    selected = (1000000, None)
+    for flavor in client.flavors.list():
+        keys = flavor.get_keys()
+        is_pinned = "hw:cpu_policy" in keys and keys["hw:cpu_policy"] == "dedicated"
+        if is_pinned ^ pinned:
+            continue
+
+        d_cpu = flavor.vcpus - vcpus
+        d_ram = flavor.ram - ram
+        distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
+        if distance < selected[0]:
+            selected = (distance, flavor)
+
+    return selected[1].name
 
 
 class OpenstackResource(PurgeableResource, ManagedResource):
