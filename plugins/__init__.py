@@ -75,6 +75,7 @@ def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
     for image in client.images.list():
         # only images that are public
         if ("image_location" not in image and image["visibility"] == "public") and \
+           ("os_distro" in image and "os_version" in image) and \
            (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()):
             t  = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
             if t > selected[0]:
@@ -109,10 +110,10 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
             continue
 
         d_cpu = flavor.vcpus - vcpus
-        d_ram = flavor.ram - ram
+        d_ram = (flavor.ram/1024) - ram
         distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
-        if distance < selected[0]:
-            selected = (distance, flavor)
+        if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
+                selected = (distance, flavor)
 
     return selected[1].name
 
