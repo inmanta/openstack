@@ -350,7 +350,7 @@ VirtualMachine.provider [1] -- Provider.virtual_machines [0:]
 
 implementation eth0Port for Host:
     port = HostPort(provider=provider, vm=self.vm, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self.vm, "ip_address"),
-                    purged=false, project=project, port_index=1)
+                    project=project, port_index=1, purged=purged)
     self.vm.eth0_port = port
     self.ip = port.address
 end
@@ -358,11 +358,12 @@ end
 implement Host using eth0Port when subnet is defined
 
 entity Host extends ip::Host, VMAttributes:
+    bool purged=false
 end
 
 implementation openstackVM for Host:
     self.vm = VirtualMachine(name=name, key_pair=key_pair, project=project, provider=provider, user_data=user_data, image=image,
-                             flavor=flavor)
+                             flavor=flavor, purged=purged)
 end
 
 implement Host using std::hostDefaults, openstackVM
@@ -372,4 +373,3 @@ Host.subnet [0:1] -- Subnet
 Host.key_pair [1] -- ssh::Key
 Host.project [1] -- Project
 Host.provider [1] -- Provider
-
