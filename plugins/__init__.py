@@ -77,7 +77,7 @@ def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
         if ("image_location" not in image and image["visibility"] == "public") and \
            ("os_distro" in image and "os_version" in image) and \
            (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()):
-            t  = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+            t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
             if t > selected[0]:
                 selected = (t, image)
 
@@ -110,7 +110,7 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
             continue
 
         d_cpu = flavor.vcpus - vcpus
-        d_ram = (flavor.ram/1024) - ram
+        d_ram = (flavor.ram / 1024) - ram
         distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
         if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
                 selected = (distance, flavor)
@@ -293,6 +293,7 @@ class SecurityGroup(OpenstackResource):
     @staticmethod
     def get_rules(exporter, group):
         rules = []
+        dedup = set()
         for rule in group.rules:
             json_rule = {"protocol": rule.ip_protocol,
                          "direction": rule.direction}
@@ -321,7 +322,12 @@ class SecurityGroup(OpenstackResource):
             except Exception:
                 pass
 
-            rules.append(json_rule)
+            key = tuple(sorted(json_rule.items()))
+            if key not in dedup:
+                dedup.add(key)
+                rules.append(json_rule)
+            else:
+                LOGGER.warning("A duplicate rule exists in security group %s", group.name)
 
         return rules
 
