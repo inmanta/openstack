@@ -56,6 +56,8 @@ loud_logger.propagate = False
 LOGGER = logging.getLogger(__name__)
 
 
+IMAGES = {}
+
 @plugin
 def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
     """
@@ -65,14 +67,18 @@ def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
 
         If multiple images match, the most recent image is returned.
     """
-    auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
-                       password=provider.password, project_name=provider.tenant,
-                       user_domain_id="default", project_domain_id="default")
-    sess = session.Session(auth=auth)
-    client = glance_client.Client("2", session=sess)
+    global IMAGES
+    if provider.name not in IMAGES:
+        auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                           password=provider.password, project_name=provider.tenant,
+                           user_domain_id="default", project_domain_id="default")
+        sess = session.Session(auth=auth)
+        client = glance_client.Client("2", session=sess)
+
+        IMAGES[provider.name] = list(client.images.list())
 
     selected = (datetime.datetime(1900, 1, 1), None)
-    for image in client.images.list():
+    for image in IMAGES[provider.name]:
         # only images that are public
         if ("image_location" not in image and image["visibility"] == "public") and \
            ("os_distro" in image and "os_version" in image) and \
@@ -86,6 +92,7 @@ def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
 
     return selected[1]["id"]
 
+FLAVORS = {}
 
 @plugin
 def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number", pinned: "bool"=False) -> "string":
@@ -96,14 +103,18 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
         :param ram: The amount of ram in megabyte
         :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
     """
-    auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
-                       password=provider.password, project_name=provider.tenant,
-                       user_domain_id="default", project_domain_id="default")
-    sess = session.Session(auth=auth)
-    client = nova_client.Client("2.1", session=sess)
+    global FLAVORS
+    if provider.name not in FLAVORS:
+        auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                           password=provider.password, project_name=provider.tenant,
+                           user_domain_id="default", project_domain_id="default")
+        sess = session.Session(auth=auth)
+        client = nova_client.Client("2.1", session=sess)
+
+        FLAVORS[provider.name] = list(client.flavors.list())
 
     selected = (1000000, None)
-    for flavor in client.flavors.list():
+    for flavor in FLAVORS[provider.name]:
         keys = flavor.get_keys()
         is_pinned = "hw:cpu_policy" in keys and keys["hw:cpu_policy"] == "dedicated"
         if is_pinned ^ pinned:
