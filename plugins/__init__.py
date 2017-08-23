@@ -1432,7 +1432,14 @@ class HostPortHandler(OpenStackHandler):
             return {}
 
         port = filtered_list[0]
-        return port
+        facts = {}
+        index = 0
+        for ip in port["fixed_ips"]:
+            facts["ip_address_%d" % index] = ip["ip_address"]
+            if index == 0:
+                facts["ip_address"] = ip["ip_address"]
+
+        return facts
 
 
 @provider("openstack::SecurityGroup", name="openstack")
