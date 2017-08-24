@@ -1368,7 +1368,7 @@ class HostPortHandler(OpenStackHandler):
             if resource.address != "" and not resource.dhcp:
                 body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
 
-            if ctx.get("portsecurity") and not resource.portsecurity:
+            if (not ctx.contains("portsecurity") or ctx.get("portsecurity")) and not resource.portsecurity:
                 body_value["port"]["port_security_enabled"] = False
                 body_value["port"]["security_groups"] = None
 
