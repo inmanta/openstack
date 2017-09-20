@@ -826,7 +826,24 @@ class VirtualMachineHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
-        ctx.get("server").delete()
+        server = ctx.get("server")
+        server.delete()
+
+        # Wait until the server has been deleted
+        count = 0
+        ctx.info("Server deleted, waiting for neutron to report all ports deleted.")
+        while server is not None and count < 60:
+            ports = self._neutron.list_ports(device_id=server.id)
+            if len(ports["ports"]) > 0:
+                time.sleep(1)
+                count += 1
+            else:
+                server = None
+
+        if server is not None:
+            ctx.warning("Delete still in progress, giving up waiting.")
+
+        ctx.set_purged()
 
     def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
         server = ctx.get("server")
@@ -859,12 +876,20 @@ class VirtualMachineHandler(OpenStackHandler):
                     if i == 0:
                         facts["subnet_%s_ip" % name] = ips[i]
 
-            # report the first ip of the port with index 1 as "ip_address"
+            # Get the private ip of the first port
+            project_id = self.get_project_id(resource, resource.project)
+            network_one = None
             for port in resource.ports:
-                if port["index"] == 1:
-                    if port["network"] in networks:
-                        ips = networks[port["network"]]
-                        facts["ip_address"] = ips[0]
+                    if port["index"] == 1:
+                        network_one = port["network"]
+
+            if project_id is not None and network_one is not None:
+                ports = self._neutron.list_ports(device_id=vm.id)
+                for port in ports["ports"]:
+                    for ips in port["fixed_ips"]:
+                        subnet = self.get_subnet(project_id, subnet_id=ips["subnet_id"])
+                        if subnet["name"] == network_one:
+                            facts["ip_address"] = ips["ip_address"]
 
             return facts
         except Exception:
@@ -1101,6 +1126,7 @@ class SubnetHandler(OpenStackHandler):
             resource.network_address = neutron_version["cidr"]
             resource.dhcp = neutron_version["enable_dhcp"]
             resource.network_id = neutron_version["network_id"]
+            resource.dns_servers = neutron_version["dns_nameservers"]
 
             pool = neutron_version["allocation_pools"][0]
             if resource.allocation_start != "" and resource.allocation_end != "":  # only change when they are both set

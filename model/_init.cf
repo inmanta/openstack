@@ -18,6 +18,7 @@
 import ip
 import ip::services
 import ssh
+import platform
 
 entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
 end
@@ -243,7 +244,7 @@ entity Router extends OpenStackResource:
     """
         A router
     """
-    admin_state admin_state
+    admin_state admin_state="up"
     string name
     bool ha=false
     bool distributed=false
@@ -330,10 +331,10 @@ FloatingIP floating_ips [0:] -- [1] Provider provider
 FloatingIP floating_ips [0:] -- [1] Network external_network
 FloatingIP floating_ips [0:] -- [1] HostPort port
 
-entity VMAttributes:
+entity VMAttributes extends platform::UserdataVM:
     string flavor
     string image
-    string user_data
+    bool install_agent=false
 end
 
 entity VirtualMachine extends OpenStackResource, VMAttributes:
@@ -373,3 +374,10 @@ Host.subnet [0:1] -- Subnet
 Host.key_pair [1] -- ssh::Key
 Host.project [1] -- Project
 Host.provider [1] -- Provider
+
+implementation userData for platform::UserdataVM:
+    platform::UserdataBootstrap(vm=self)
+end
+
+implement VirtualMachine using userData when install_agent
+implement Host using userData when install_agent
