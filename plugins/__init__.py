@@ -59,13 +59,17 @@ LOGGER = logging.getLogger(__name__)
 IMAGES = {}
 
 @plugin
-def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
+def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=None) -> "string":
     """
         Search for an image that matches the given operating system. This plugin uses
         the os_distro and os_version tags of an image and the name and version attributes of
         the OS parameter.
 
         If multiple images match, the most recent image is returned.
+
+        :param provider: The provider to query for an image
+        :param os: The operating system and version (using os_distro and os_version metadata)
+        :param name: An optional string that the image name should contain
     """
     global IMAGES
     if provider.name not in IMAGES:
@@ -82,7 +86,8 @@ def find_image(provider: "openstack::Provider", os: "std::OS") -> "string":
         # only images that are public
         if ("image_location" not in image and image["visibility"] == "public") and \
            ("os_distro" in image and "os_version" in image) and \
-           (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()):
+           (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
+           (name is None or name in image["name"]):
             t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
             if t > selected[0]:
                 selected = (t, image)
