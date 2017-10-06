@@ -334,6 +334,7 @@ entity VMAttributes:
     string flavor
     string image
     string user_data
+    bool config_drive=false
 end
 
 entity VirtualMachine extends OpenStackResource, VMAttributes:

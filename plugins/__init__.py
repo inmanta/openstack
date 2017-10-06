@@ -158,7 +158,7 @@ class VirtualMachine(OpenstackResource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
-    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups")
+    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups", "config_drive")
 
     @staticmethod
     def get_key_name(exporter, vm):
@@ -822,7 +822,7 @@ class VirtualMachineHandler(OpenStackHandler):
         nics = self._build_nic_list(resource.ports)
         self._nova.servers.create(resource.name, flavor=flavor.id, userdata=resource.user_data, nics=nics,
                                   security_groups=self._build_sg_list(ctx, resource.security_groups),
-                                  image=resource.image, key_name=resource.key_name)
+                                  image=resource.image, key_name=resource.key_name, config_drive=resource.config_drive)
         ctx.set_created()
 
     def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
