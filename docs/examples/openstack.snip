@@ -33,7 +33,7 @@ project = openstack::Project(provider=provider, name=provider.tenant, descriptio
 
 # Define the network objects to connect the virtual machine to but again, do not manage them
 net = openstack::Network(provider=provider, project=project, name=network_name, managed=false)
-subnet = openstack::Subnet(provider=provider, project=project, network=net, dhcp=true, managed=false
+subnet = openstack::Subnet(provider=provider, project=project, network=net, dhcp=true, managed=false,
                            name=subnet_name, network_address=network_address)
 
 # Define the virtual machine
