@@ -1312,8 +1312,10 @@ class RouterPortHandler(OpenStackHandler):
 
 @provider("openstack::HostPort", name="openstack")
 class HostPortHandler(OpenStackHandler):
-    def get_port(self, network_id, device_id):
+    def get_port(self, ctx, network_id, device_id):
         ports = self._neutron.list_ports(network_id=network_id, device_id=device_id)["ports"]
+        ctx.debug("Retrieved ports matching network %(network_id)s and device %(device_id)s",
+                  network_id=network_id, device_id=device_id, ports=ports)
         if len(ports) > 0:
             return ports[0]
         return None
@@ -1358,7 +1360,7 @@ class HostPortHandler(OpenStackHandler):
 
         ctx.set("vm", vm)
 
-        port = self.get_port(network["id"], vm.id)
+        port = self.get_port(ctx, network["id"], vm.id)
         ctx.set("port", port)
         if port is None:
             raise ResourcePurged()
