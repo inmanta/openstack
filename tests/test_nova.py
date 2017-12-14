@@ -28,25 +28,8 @@ def print_ctx(ctx):
             print(l._data["kwargs"]["traceback"])
 
 
-def find_small_flavor(nova):
-    smallest = None
-    for flavor in nova.flavors.list():
-        if smallest is None:
-            smallest = flavor
-        elif flavor.ram < smallest.ram:
-            smallest = flavor
-
-    return smallest
-
-
 def test_boot_vm(project, keystone, nova, neutron):
     name = "inmanta-unit-test"
-    images = [n for n in nova.images.list() if "cirros" in n.name]
-    if len(images) == 0:
-        raise Exception("No image with name 'cirros' in its name available")
-    image = images[0].id
-
-    flavor = find_small_flavor(nova).name
     key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
            "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
            "bart@wolf.inmanta.com")
@@ -57,6 +40,8 @@ import unittest
 import openstack
 import ssh
 
+os = std::OS(name="cirros", version="0.3", family=std::linux)
+
 tenant = std::get_env("OS_PROJECT_NAME")
 p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                         password=std::get_env("OS_PASSWORD"), tenant=tenant)
@@ -65,9 +50,9 @@ project = openstack::Project(provider=p, name=tenant, description="", enabled=tr
 net = openstack::Network(provider=p, project=project, name="%(name)s")
 subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="%(name)s",
                            network_address="10.255.255.0/24")
-vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=std::linux,
-                     image="%(image)s", flavor="%(flavor)s", user_data="", subnet=subnet)
-        """ % {"name": name, "image": image, "flavor": flavor, "key": key})
+vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os,
+                     image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
+        """ % {"name": name, "key": key})
 
     n1 = project.get_resource("openstack::Network", name=name)
     ctx = project.deploy(n1)
@@ -77,7 +62,7 @@ vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s",
     ctx = project.deploy(s1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
-    h1 = project.get_resource("openstack::Host", name=name)
+    h1 = project.get_resource("openstack::VirtualMachine", name=name)
     ctx = project.deploy(h1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
@@ -90,6 +75,8 @@ import unittest
 import openstack
 import ssh
 
+os = std::OS(name="cirros", version="0.3", family=std::linux)
+
 tenant = std::get_env("OS_PROJECT_NAME")
 p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                         password=std::get_env("OS_PASSWORD"), tenant=tenant)
@@ -99,14 +86,15 @@ project = openstack::Project(provider=p, name=tenant, description="", enabled=tr
 net = openstack::Network(provider=p, project=project, name="%(name)s", purged=true)
 subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="%(name)s",
                            network_address="10.255.255.0/24", purged=true)
-vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=std::linux,
-                     image="%(image)s", flavor="%(flavor)s", user_data="", subnet=subnet, purged=true)
-        """ % {"name": name, "image": image, "flavor": flavor, "key": key})
+vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os, purged=true,
+                     image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
+        """ % {"name": name, "key": key})
 
-    h1 = project.get_resource("openstack::Host", name=name)
+    h1 = project.get_resource("openstack::VirtualMachine", name=name)
     ctx = project.deploy(h1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
+    server = None
     try:
         count = 0
         while count < 10:
@@ -117,6 +105,17 @@ vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s",
         assert False, "VM should be gone in 10 seconds"
     except Exception:
         pass
+
+    count = 0
+    while server is not None and count < 60:
+        ports = neutron.list_ports(device_id=server.id)
+        if len(ports["ports"]) > 0:
+            time.sleep(1)
+            count += 1
+        else:
+            server = None
+
+    assert server is None, "Waiting for VM delete timeout"
 
     s1 = project.get_resource("openstack::Subnet", name=name)
     ctx = project.deploy(s1)

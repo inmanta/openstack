@@ -1,5 +1,5 @@
 """
-    Copyright 2016 Inmanta
+    Copyright 2017 Inmanta
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 """
 import ip
 import ip::services
-import vm
 import ssh
+import platform
 
 entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
 end
@@ -34,11 +34,17 @@ entity Provider:
     string tenant
     string token=""
     string admin_url=""
+    bool auto_agent=true
 end
 
 index Provider(name)
 
+implementation agentConfig for Provider:
+    std::AgentConfig(autostart=true, agentname=name, uri="local:", provides=self)
+end
+
 implement Provider using std::none
+implement Provider using agentConfig when auto_agent
 
 ## Keystone config
 entity Project extends OpenStackResource:
@@ -46,8 +52,8 @@ entity Project extends OpenStackResource:
         A project / tenant in openstack
     """
     string name
-    bool enabled
-    string description
+    bool enabled=true
+    string description=""
 end
 index Project(provider, name)
 Project projects [0:] -- [1] Provider provider
@@ -181,17 +187,27 @@ Subnet subnet [0:1] -- [0:] RouterPort routers
 entity HostPort extends Port:
     """
         A port attached to a VM
+
+        :param name: The name of the host port.
+        :param portsecurity: Enable or disable port security (security groups and spoofing filters)
+        :param dhcp: Enable dhcp for this port or not for this port
+        :param port_index: The index of the port. This determines the order of the interfaces on the virtual machine. 0 means no specific order.
+        :param retries: A hostport can only be attached to a VM when it is in an active state. The handler will skip this port when the VM is not ready. To
+                        speed up deployments, the handler can retry this number of times before skipping the resource.
+        :param wait: The number of seconds to wait between retries.
     """
     string name
     bool portsecurity=true
     bool dhcp=true
     number port_index=0
+    number retries=20
+    number wait=5
 end
 
 implement HostPort using std::none
 
 Subnet subnet [1] -- [0:] HostPort host_ports
-Host host [1] -- [0:] HostPort ports
+VirtualMachine vm [1] -- [0:] HostPort ports
 
 index HostPort(provider, name)
 
@@ -228,7 +244,7 @@ entity Router extends OpenStackResource:
     """
         A router
     """
-    admin_state admin_state
+    admin_state admin_state="up"
     string name
     bool ha=false
     bool distributed=false
@@ -249,9 +265,17 @@ Project project [1] -- [0:] Router routers
 typedef direction as string matching self == "ingress" or self == "egress"
 
 entity SecurityGroup extends OpenStackResource:
+    """
+        :param retries: A security group can only be deleted when it is no longer in use. The API confirms the delete of a virtual machine for example, but
+                        it might still be in progress. This results in a failure to delete the security group. To speed up deployments, the handler can
+                        retry this number of times before skipping the resource.
+        :param wait: The number of seconds to wait between retries.
+    """
     string description=""
     string name
     bool manage_all=true
+    number retries=10
+    number wait=5
 end
 
 index SecurityGroup(project, name)
@@ -260,7 +284,7 @@ implement SecurityGroup using std::none
 
 SecurityGroup security_groups [0:] -- [1] Provider provider
 SecurityGroup security_groups [0:] -- [1] Project project
-SecurityGroup security_groups [0:] -- [0:] Host host
+SecurityGroup security_groups [0:] -- [0:] VirtualMachine virtual_machines
 
 entity SecurityRule:
     """
@@ -307,30 +331,57 @@ FloatingIP floating_ips [0:] -- [1] Provider provider
 FloatingIP floating_ips [0:] -- [1] Network external_network
 FloatingIP floating_ips [0:] -- [1] HostPort port
 
-entity Host extends ip::Host, OpenStackResource:
+entity VMAttributes extends platform::UserdataVM:
     string flavor
     string image
     string user_data
+    bool config_drive=false
+    bool install_agent=false
 end
 
-Host eth0_host [1] -- [1] HostPort eth0_port
-
-implement Host using std::hostDefaults, ipFact
-
-implementation ipFact for Host:
-    self.ip = std::getfact(self, "ip_address")
+entity VirtualMachine extends OpenStackResource, VMAttributes:
+    string name
 end
+implement VirtualMachine using std::none
+
+index VirtualMachine(provider, name)
+
+VirtualMachine.eth0_port [1] -- HostPort
+VirtualMachine.key_pair [1] -- ssh::Key
+VirtualMachine.project [1] -- Project
+VirtualMachine.provider [1] -- Provider.virtual_machines [0:]
+
+entity Host extends ip::Host, VMAttributes:
+    bool purged=false
+end
+
+Host.vm [1] -- VirtualMachine.host [0:1]
+Host.subnet [0:1] -- Subnet
+Host.key_pair [1] -- ssh::Key
+Host.project [1] -- Project
+Host.provider [1] -- Provider
+Host.security_groups [0:] -- SecurityGroup
 
 implementation eth0Port for Host:
-    port = HostPort(provider=provider, host=self, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self, "ip_address"),
-                    purged=false, project=project, port_index=1)
-    self.eth0_port = port
+    port = HostPort(provider=provider, vm=self.vm, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self.vm, "ip_address"),
+                    project=project, port_index=1, purged=purged)
+    self.vm.eth0_port = port
+    self.ip = port.address
 end
 
 implement Host using eth0Port when subnet is defined
 
-Subnet subnet [0:1] -- [0:] Host hosts
-ssh::Key key_pair [1] -- [0:] Host openstack_hosts
-Project project [1] -- [0:] Host hosts
-Provider provider [1] -- [0:] Host openstack_hosts
+implementation openstackVM for Host:
+    self.vm = VirtualMachine(name=name, key_pair=key_pair, project=project, provider=provider, user_data=user_data, image=image,
+                             flavor=flavor, purged=purged, security_groups=security_groups)
+    self.requires = self.vm
+end
 
+implement Host using std::hostDefaults, openstackVM
+
+implementation userData for platform::UserdataVM:
+    platform::UserdataBootstrap(vm=self)
+end
+
+implement VirtualMachine using userData when install_agent
+implement Host using userData when install_agent

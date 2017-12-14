@@ -19,13 +19,17 @@
 import os
 import traceback
 import logging
+import time
+import datetime
+import math
 
-from inmanta.execute.proxy import UnknownException
+from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources
 from inmanta.agent import handler
 from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
+from inmanta.plugins import plugin
 
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
@@ -36,6 +40,8 @@ import novaclient.exceptions
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
 from keystoneclient.v3 import client as keystone_client
+
+from glanceclient import client as glance_client
 
 try:
     from keystoneclient.exceptions import NotFound
@@ -48,6 +54,84 @@ loud_logger.propagate = False
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+IMAGES = {}
+
+@plugin
+def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=None) -> "string":
+    """
+        Search for an image that matches the given operating system. This plugin uses
+        the os_distro and os_version tags of an image and the name and version attributes of
+        the OS parameter.
+
+        If multiple images match, the most recent image is returned.
+
+        :param provider: The provider to query for an image
+        :param os: The operating system and version (using os_distro and os_version metadata)
+        :param name: An optional string that the image name should contain
+    """
+    global IMAGES
+    if provider.name not in IMAGES:
+        auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                           password=provider.password, project_name=provider.tenant,
+                           user_domain_id="default", project_domain_id="default")
+        sess = session.Session(auth=auth)
+        client = glance_client.Client("2", session=sess)
+
+        IMAGES[provider.name] = list(client.images.list())
+
+    selected = (datetime.datetime(1900, 1, 1), None)
+    for image in IMAGES[provider.name]:
+        # only images that are public
+        if ("image_location" not in image and image["visibility"] == "public") and \
+           ("os_distro" in image and "os_version" in image) and \
+           (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
+           (name is None or name in image["name"]):
+            t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+            if t > selected[0]:
+                selected = (t, image)
+
+    if selected[1]["id"] is None:
+        raise Exception("No image found for os %s and version %s" % (os.name, os.version))
+
+    return selected[1]["id"]
+
+FLAVORS = {}
+
+@plugin
+def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number", pinned: "bool"=False) -> "string":
+    """
+        Find the flavor that matches the closest to the resources requested.
+
+        :param vcpus: The number of virtual cpus in the flavor
+        :param ram: The amount of ram in megabyte
+        :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
+    """
+    global FLAVORS
+    if provider.name not in FLAVORS:
+        auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                           password=provider.password, project_name=provider.tenant,
+                           user_domain_id="default", project_domain_id="default")
+        sess = session.Session(auth=auth)
+        client = nova_client.Client("2.1", session=sess)
+
+        FLAVORS[provider.name] = list(client.flavors.list())
+
+    selected = (1000000, None)
+    for flavor in FLAVORS[provider.name]:
+        keys = flavor.get_keys()
+        is_pinned = "hw:cpu_policy" in keys and keys["hw:cpu_policy"] == "dedicated"
+        if is_pinned ^ pinned:
+            continue
+
+        d_cpu = flavor.vcpus - vcpus
+        d_ram = (flavor.ram / 1024) - ram
+        distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
+        if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
+                selected = (distance, flavor)
+
+    return selected[1].name
 
 
 class OpenstackResource(PurgeableResource, ManagedResource):
@@ -74,12 +158,12 @@ class OpenstackResource(PurgeableResource, ManagedResource):
         return resource.provider.connection_url
 
 
-@resource("openstack::Host", agent="provider.name", id_attribute="name")
-class Host(OpenstackResource):
+@resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
+class VirtualMachine(OpenstackResource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
-    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups")
+    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups", "config_drive")
 
     @staticmethod
     def get_key_name(exporter, vm):
@@ -97,7 +181,7 @@ class Host(OpenstackResource):
         """
         try:
             ua = vm.user_data
-        except UnknownException:
+        except proxy.UnknownException:
             ua = ""
         return ua
 
@@ -108,7 +192,7 @@ class Host(OpenstackResource):
             port = {"name": p.name, "address": None, "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
             try:
                 port["address"] = p.address
-            except UnknownException:
+            except proxy.UnknownException:
                 pass
             ports.append(port)
 
@@ -132,7 +216,7 @@ class Subnet(OpenstackResource):
     """
         This class represent a subnet in neutron
     """
-    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network")
+    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network", "dns_servers")
 
     @staticmethod
     def get_network(_, subnet):
@@ -192,13 +276,14 @@ class HostPort(OpenstackResource):
     """
         A port in a router
     """
-    fields = ("name", "address", "subnet", "host", "network", "portsecurity", "dhcp", "port_index")
+    fields = ("name", "address", "subnet", "host", "network", "portsecurity", "dhcp", "port_index",
+              "retries", "wait")
 
     @staticmethod
     def get_address(exporter, port):
         try:
             return port.address
-        except UnknownException:
+        except proxy.UnknownException:
             return ""
 
     @staticmethod
@@ -211,7 +296,7 @@ class HostPort(OpenstackResource):
 
     @staticmethod
     def get_host(_, port):
-        return port.host.name
+        return port.vm.name
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
@@ -219,11 +304,12 @@ class SecurityGroup(OpenstackResource):
     """
         A security group in an OpenStack tenant
     """
-    fields = ("name", "description", "manage_all", "rules")
+    fields = ("name", "description", "manage_all", "rules", "retries", "wait")
 
     @staticmethod
     def get_rules(exporter, group):
         rules = []
+        dedup = set()
         for rule in group.rules:
             json_rule = {"protocol": rule.ip_protocol,
                          "direction": rule.direction}
@@ -252,7 +338,12 @@ class SecurityGroup(OpenstackResource):
             except Exception:
                 pass
 
-            rules.append(json_rule)
+            key = tuple(sorted(json_rule.items()))
+            if key not in dedup:
+                dedup.add(key)
+                rules.append(json_rule)
+            else:
+                LOGGER.warning("A duplicate rule exists in security group %s", group.name)
 
         return rules
 
@@ -362,6 +453,8 @@ def openstack_dependencies(config_model, resource_model):
     vms = {}
     ports = {}
     fips = {}
+    sgs = {}
+    router_map = {}
 
     for _, res in resource_model.items():
         if res.id.entity_type == "openstack::Project":
@@ -376,7 +469,7 @@ def openstack_dependencies(config_model, resource_model):
         elif res.id.entity_type == "openstack::Subnet":
             subnets[res.name] = res
 
-        elif res.id.entity_type == "openstack::Host":
+        elif res.id.entity_type == "openstack::VirtualMachine":
             vms[res.name] = res
 
         elif res.id.entity_type == "openstack::HostPort":
@@ -384,6 +477,9 @@ def openstack_dependencies(config_model, resource_model):
 
         elif res.id.entity_type == "openstack::FloatingIP":
             fips[res.name] = res
+
+        elif res.id.entity_type == "openstack::SecurityGroup":
+            sgs[res.name] = res
 
     # they require the tenant to exist
     for network in networks.values():
@@ -398,6 +494,12 @@ def openstack_dependencies(config_model, resource_model):
         for subnet_name in router.subnets:
             if subnet_name in subnets:
                 router.requires.add(subnets[subnet_name])
+
+            # create external/subnet mapping
+            router_map[(router.gateway, subnet_name)] = router
+
+        if router.gateway in networks:
+            router.requires.add(networks[router.gateway])
 
     for subnet in subnets.values():
         if subnet.model.project.name in projects:
@@ -415,6 +517,10 @@ def openstack_dependencies(config_model, resource_model):
             if port["network"] in subnets:
                 vm.requires.add(subnets[port["network"]])
 
+        for sg in vm.security_groups:
+            if sg in sgs:
+                vm.requires.add(sgs[sg])
+
     for port in ports.values():
         if port.model.project.name in projects:
             port.requires.add(projects[port.model.project.name])
@@ -430,7 +536,13 @@ def openstack_dependencies(config_model, resource_model):
             fip.requires.add(networks[fip.external_network])
 
         if fip.port in ports:
-            fip.requires.add(ports[fip.port])
+            port = ports[fip.port]
+            fip.requires.add(port)
+
+            # find router on which this floating ip is added
+            key = (fip.external_network, port.subnet)
+            if key in router_map:
+                fip.requires.add(router_map[key])
 
 
 CRED_TIMEOUT = 600
@@ -606,8 +718,8 @@ class OpenStackHandler(CRUDHandler):
         return sgs["security_groups"][0]
 
 
-@provider("openstack::Host", name="openstack")
-class HostHandler(OpenStackHandler):
+@provider("openstack::VirtualMachine", name="openstack")
+class VirtualMachineHandler(OpenStackHandler):
     @cache(timeout=10)
     def get_vm(self, ctx, resource):
         if resource.project == resource.admin_tenant:
@@ -621,7 +733,11 @@ class HostHandler(OpenStackHandler):
                 ctx.exception("Unable to retrieve server list with a scoped login on project %(admin_project)s, "
                               "for project %(project)s. This only works with admin credentials.",
                               admin_project=resource.admin_tenant, project=resource.project, traceback=traceback.format_exc())
+                return None
 
+        # OS query semantic are not == but "in". So "mon" matches mon and mongo
+        # Filter again to ensure a correct result
+        servers = [x for x in servers if x.name == resource.name]
         if len(servers) == 0:
             return None
 
@@ -690,7 +806,7 @@ class HostHandler(OpenStackHandler):
         """
         server = self.get_vm(ctx, resource)
         if server is None:
-            resource.purged = True
+            raise ResourcePurged()
 
         else:
             resource.purged = False
@@ -711,11 +827,28 @@ class HostHandler(OpenStackHandler):
         nics = self._build_nic_list(resource.ports)
         self._nova.servers.create(resource.name, flavor=flavor.id, userdata=resource.user_data, nics=nics,
                                   security_groups=self._build_sg_list(ctx, resource.security_groups),
-                                  image=resource.image, key_name=resource.key_name)
+                                  image=resource.image, key_name=resource.key_name, config_drive=resource.config_drive)
         ctx.set_created()
 
     def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
-        ctx.get("server").delete()
+        server = ctx.get("server")
+        server.delete()
+
+        # Wait until the server has been deleted
+        count = 0
+        ctx.info("Server deleted, waiting for neutron to report all ports deleted.")
+        while server is not None and count < 60:
+            ports = self._neutron.list_ports(device_id=server.id)
+            if len(ports["ports"]) > 0:
+                time.sleep(1)
+                count += 1
+            else:
+                server = None
+
+        if server is not None:
+            ctx.warning("Delete still in progress, giving up waiting.")
+
+        ctx.set_purged()
 
     def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
         server = ctx.get("server")
@@ -748,12 +881,20 @@ class HostHandler(OpenStackHandler):
                     if i == 0:
                         facts["subnet_%s_ip" % name] = ips[i]
 
-            # report the first ip of the port with index 1 as "ip_address"
+            # Get the private ip of the first port
+            project_id = self.get_project_id(resource, resource.project)
+            network_one = None
             for port in resource.ports:
-                if port["index"] == 1:
-                    if port["network"] in networks:
-                        ips = networks[port["network"]]
-                        facts["ip_address"] = ips[0]
+                    if port["index"] == 1:
+                        network_one = port["network"]
+
+            if project_id is not None and network_one is not None:
+                ports = self._neutron.list_ports(device_id=vm.id)
+                for port in ports["ports"]:
+                    for ips in port["fixed_ips"]:
+                        subnet = self.get_subnet(project_id, subnet_id=ips["subnet_id"])
+                        if subnet["name"] == network_one:
+                            facts["ip_address"] = ips["ip_address"]
 
             return facts
         except Exception:
@@ -784,7 +925,7 @@ class NetworkHandler(OpenStackHandler):
             raise ResourcePurged()
 
     def _create_dict(self, resource: Network, project_id):
-        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True}
+        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True, "router:external": resource.external}
 
         if resource.physical_network != "":
             net["provider:physical_network"] = resource.physical_network
@@ -861,9 +1002,10 @@ class RouterHandler(OpenStackHandler):
             if port["name"] == "" or port["name"] not in resource.ports:
                 for subnet in subnets:
                     try:
-                        subnet_details = self._neutron.show_subnet(subnet["subnet_id"])
-                        if subnet_details["subnet"]["network_id"] != external_net_id:
-                            subnet_list.append(subnet_details["subnet"]["name"])
+                        subnet_details = self._neutron.show_subnet(subnet["subnet_id"])["subnet"]
+                        # skip external networks and neutron networks such as ha networks
+                        if subnet_details["network_id"] != external_net_id and subnet_details["tenant_id"] != "":
+                            subnet_list.append(subnet_details["name"])
 
                     except exceptions.NeutronClientException:
                         pass
@@ -989,6 +1131,7 @@ class SubnetHandler(OpenStackHandler):
             resource.network_address = neutron_version["cidr"]
             resource.dhcp = neutron_version["enable_dhcp"]
             resource.network_id = neutron_version["network_id"]
+            resource.dns_servers = neutron_version["dns_nameservers"]
 
             pool = neutron_version["allocation_pools"][0]
             if resource.allocation_start != "" and resource.allocation_end != "":  # only change when they are both set
@@ -1014,21 +1157,31 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
             body["allocation_pools"] = [{"start": resource.allocation_start, "end": resource.allocation_end}]
 
+        if len(resource.dns_servers) > 0:
+            body["dns_nameservers"] = resource.dns_servers
+
         self._neutron.create_subnet({"subnet": body})
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         neutron = ctx.get("neutron")
         self._neutron.delete_subnet(neutron["id"])
+        ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         neutron = ctx.get("neutron")
+
+        # Send everything that can be updated to the server, the API will figure out what to change
         body = {"subnet": {"enable_dhcp": resource.dhcp}}
         if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
             body["allocation_pools"] = [{"start": resource.allocation_start,
                                          "end": resource.allocation_end}]
 
+        if len(resource.dns_servers) > 0:
+            body["dns_nameservers"] = resource.dns_servers
+
         self._neutron.update_subnet(neutron["id"], body)
+        ctx.set_updated()
 
     @cache(timeout=5)
     def facts(self, ctx, resource):
@@ -1159,13 +1312,38 @@ class RouterPortHandler(OpenStackHandler):
 
 @provider("openstack::HostPort", name="openstack")
 class HostPortHandler(OpenStackHandler):
-    def get_port(self, network_id, device_id):
+    def get_port(self, ctx, network_id, device_id):
         ports = self._neutron.list_ports(network_id=network_id, device_id=device_id)["ports"]
+        ctx.debug("Retrieved ports matching network %(network_id)s and device %(device_id)s",
+                  network_id=network_id, device_id=device_id, ports=ports)
         if len(ports) > 0:
             return ports[0]
         return None
 
+    def wait_for_active(self, ctx, project_id, resource):
+        """
+            A port cannot be attached to a VM when the VM is in the building state. This method waits a limited amount of
+            time for the VM to become active. If it takes to long, this resource will be skipped.
+        """
+        tries = 0
+        max_attempts = resource.retries if resource.retries > 0 else 1
+        while tries < max_attempts:
+            vm = self.get_host(project_id, resource.host)
+            vm_state = getattr(vm, "OS-EXT-STS:vm_state")
+            if vm_state == "active":
+                return vm
+
+            ctx.info("VM for port is not in active state. Waiting and retrying in 5 seconds.")
+            tries += 1
+            time.sleep(resource.wait)
+
+        raise SkipResource("Unable to create host port because vm is not in active state (current %s)" % vm_state)
+
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
+        if resource.purged:
+            # Most stuff below here will err eventually
+            return
+
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create  a host port when project id is not yet known.")
@@ -1176,12 +1354,13 @@ class HostPortHandler(OpenStackHandler):
             raise SkipResource("Network %s for port %s not found." % (resource.network, resource.name))
         ctx.set("network", network)
 
-        vm = self.get_host(project_id, resource.host)
+        vm = self.wait_for_active(ctx, project_id, resource)
         if vm is None:
             raise SkipResource("Unable to create host port because the vm does not exist.")
+
         ctx.set("vm", vm)
 
-        port = self.get_port(network["id"], vm.id)
+        port = self.get_port(ctx, network["id"], vm.id)
         ctx.set("port", port)
         if port is None:
             raise ResourcePurged()
@@ -1196,14 +1375,23 @@ class HostPortHandler(OpenStackHandler):
         else:
             resource.subnet = ""
 
-        resource.portsecurity = port["port_security_enabled"]
+        if "port_security_enabled" in port:
+            resource.portsecurity = port["port_security_enabled"]
+            ctx.set("portsecurity", True)
+        else:
+            ctx.set("portsecurity", False)
+            resource.portsecurity = True
+            if not resource.portsecurity:
+                # Port security is not enabled in the API, but resource wants to disable it.
+                ctx.warning("Ignoring portsecurity is False because extension is not enabled.")
+
         resource.name = port["name"]
 
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = ctx.get("project_id")
         network = ctx.get("network")
         vm = ctx.get("vm")
-        subnet = self.get_subnet_id(project_id, name=resource.subnet)
+        subnet = self.get_subnet(project_id, name=resource.subnet)
         if subnet is None:
             raise SkipResource("Unable to create host port because the subnet does not exist.")
 
@@ -1213,7 +1401,7 @@ class HostPortHandler(OpenStackHandler):
             if resource.address != "" and not resource.dhcp:
                 body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
 
-            if not resource.portsecurity:
+            if (not ctx.contains("portsecurity") or ctx.get("portsecurity")) and not resource.portsecurity:
                 body_value["port"]["port_security_enabled"] = False
                 body_value["port"]["security_groups"] = None
 
@@ -1232,14 +1420,16 @@ class HostPortHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        self._neutron.delete_port(ctx.get("port")["id"])
+        port = ctx.get("port")
+        response = self._neutron.delete_port(port["id"])
+        ctx.info("Deleted port %(port_id)s with response %(response)s", port_id=port["id"], response=response)
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         port = ctx.get("port")
 
         try:
-            if "portsecurity" in changes:
+            if ctx.get("portsecurity") and "portsecurity" in changes:
                 if not changes["portsecurity"]["desired"]:
                     self._neutron.update_port(port=port["id"], body={"port": {"port_security_enabled": False,
                                                                               "security_groups": None}})
@@ -1275,10 +1465,15 @@ class HostPortHandler(OpenStackHandler):
             return {}
 
         port = filtered_list[0]
-        return port
+        facts = {}
+        index = 0
+        for ip in port["fixed_ips"]:
+            facts["ip_address_%d" % index] = ip["ip_address"]
+            if index == 0:
+                facts["ip_address"] = ip["ip_address"]
 
-import pprint
-from pprint import pprint
+        return facts
+
 
 @provider("openstack::SecurityGroup", name="openstack")
 class SecurityGroupHandler(OpenStackHandler):
@@ -1411,8 +1606,20 @@ class SecurityGroupHandler(OpenStackHandler):
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
         sg = ctx.get("sg")
-        self._neutron.delete_security_group(sg["id"])
-        ctx.set_purged()
+        tries = 0
+        max_attempts = resource.retries if resource.retries > 0 else 1
+        while tries < max_attempts:
+            try:
+                self._neutron.delete_security_group(sg["id"])
+                ctx.set_purged()
+                return
+            except Exception:
+                ctx.info("Delete failed. Waiting and trying again in 5 seconds.")
+                time.sleep(resource.wait)
+                tries += 1
+
+        raise SkipResource("Deleting the security group failed, probably because it is still in use.")
+
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: SecurityGroup) -> None:
         sg = ctx.get("sg")
@@ -1495,7 +1702,7 @@ class FloatingIPHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: FloatingIP) -> None:
-        self._neutron.delete_floatingip(ctx.get("fip")["id"])
+        self._neutron.delete_floatingip(ctx.get("fip"))
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: FloatingIP) -> None:
