@@ -1714,7 +1714,7 @@ class EndpointHandler(OpenStackHandler):
         try:
             endpoints = {e.interface: e for e in self._keystone.endpoints.list(region=resource.region, service=service)}
             for k, v in EndpointHandler.types.items():
-                setattr(resource, v, endpoints[k] if k in endpoints else None)
+                setattr(resource, v, endpoints[k].url if k in endpoints else None)
 
             resource.purged = False
         except NotFound:
