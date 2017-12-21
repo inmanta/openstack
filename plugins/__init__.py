@@ -629,7 +629,10 @@ class OpenStackHandler(CRUDHandler):
         if name is not None:
             subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
         elif subnet_id is not None:
-            subnets = self._neutron.list_subnets(tenant_id=project_id, id=subnet_id)
+            if project_id is not None:
+                subnets = self._neutron.list_subnets(tenant_id=project_id, id=subnet_id)
+            else:
+                subnets = self._neutron.list_subnets(id=subnet_id)
         else:
             raise Exception("Either a name or an id needs to be provided.")
 
