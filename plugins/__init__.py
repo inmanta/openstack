@@ -208,7 +208,7 @@ class Network(OpenstackResource):
     """
         This class represents a network in neutron
     """
-    fields = ("name", "external", "physical_network", "network_type", "segmentation_id")
+    fields = ("name", "external", "physical_network", "network_type", "segmentation_id", "shared")
 
 
 @resource("openstack::Subnet", agent="provider.name", id_attribute="name")
@@ -629,7 +629,10 @@ class OpenStackHandler(CRUDHandler):
         if name is not None:
             subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
         elif subnet_id is not None:
-            subnets = self._neutron.list_subnets(tenant_id=project_id, id=subnet_id)
+            if project_id is not None:
+                subnets = self._neutron.list_subnets(tenant_id=project_id, id=subnet_id)
+            else:
+                subnets = self._neutron.list_subnets(id=subnet_id)
         else:
             raise Exception("Either a name or an id needs to be provided.")
 
@@ -925,7 +928,8 @@ class NetworkHandler(OpenStackHandler):
             raise ResourcePurged()
 
     def _create_dict(self, resource: Network, project_id):
-        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True, "router:external": resource.external}
+        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True, "router:external": resource.external,
+               "shared": resource.shared}
 
         if resource.physical_network != "":
             net["provider:physical_network"] = resource.physical_network
@@ -1329,9 +1333,10 @@ class HostPortHandler(OpenStackHandler):
         max_attempts = resource.retries if resource.retries > 0 else 1
         while tries < max_attempts:
             vm = self.get_host(project_id, resource.host)
-            vm_state = getattr(vm, "OS-EXT-STS:vm_state")
-            if vm_state == "active":
-                return vm
+            if vm is not None:
+                vm_state = getattr(vm, "OS-EXT-STS:vm_state")
+                if vm_state == "active":
+                    return vm
 
             ctx.info("VM for port is not in active state. Waiting and retrying in 5 seconds.")
             tries += 1
@@ -1349,7 +1354,7 @@ class HostPortHandler(OpenStackHandler):
             raise SkipResource("Cannot create  a host port when project id is not yet known.")
         ctx.set("project_id", project_id)
 
-        network = self.get_network(project_id, resource.network)
+        network = self.get_network(None, resource.network)
         if network is None:
             raise SkipResource("Network %s for port %s not found." % (resource.network, resource.name))
         ctx.set("network", network)
@@ -1370,8 +1375,13 @@ class HostPortHandler(OpenStackHandler):
             resource.address = port["fixed_ips"][0]["ip_address"]
 
         if len(port["fixed_ips"]) > 0:
-            subnet = self.get_subnet(project_id, subnet_id=port["fixed_ips"][0]["subnet_id"])
-            resource.subnet = subnet["name"]
+            subnet = self.get_subnet(None, subnet_id=port["fixed_ips"][0]["subnet_id"])
+            if subnet is None:
+                ctx.warning("Unable to find the name of the subnet with id %(subnet_id)s for port %(port_id)s with ip %(ip)s",
+                            subnet_id=port["fixed_ips"][0]["subnet_id"], port_id=port["id"],
+                            ip=port["fixed_ips"][0]["ip_address"])
+            else:
+                resource.subnet = subnet["name"]
         else:
             resource.subnet = ""
 

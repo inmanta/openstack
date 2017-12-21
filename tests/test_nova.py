@@ -40,7 +40,7 @@ import unittest
 import openstack
 import ssh
 
-os = std::OS(name="cirros", version="0.3", family=std::linux)
+os = std::OS(name="cirros", version="0.4", family=std::linux)
 
 tenant = std::get_env("OS_PROJECT_NAME")
 p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
@@ -75,7 +75,7 @@ import unittest
 import openstack
 import ssh
 
-os = std::OS(name="cirros", version="0.3", family=std::linux)
+os = std::OS(name="cirros", version="0.4", family=std::linux)
 
 tenant = std::get_env("OS_PROJECT_NAME")
 p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),

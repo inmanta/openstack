@@ -152,6 +152,7 @@ entity Network extends OpenStackResource:
     string physical_network=""
     string network_type=""
     number segmentation_id=0
+    bool shared=false
 end
 
 Network networks [0:] -- [1] Provider provider
