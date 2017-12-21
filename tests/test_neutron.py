@@ -378,7 +378,7 @@ openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="tcp", port=22
 openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="all", remote_prefix="0.0.0.0/0")
 
 
-os = std::OS(name="cirros", version="0.3", family=std::linux)
+os = std::OS(name="cirros", version="0.4", family=std::linux)
 
 key = ssh::Key(name="%(name)s", public_key="%(key)s")
 net = openstack::Network(provider=p, project=project, name="%(name)s")
@@ -420,3 +420,102 @@ vm2.vm.security_groups=[sg_mgmt]
     hp1 = project.get_resource("openstack::HostPort", name=name + "-2_eth0")
     ctx = project.deploy(hp1)
     assert ctx.status == inmanta.const.ResourceState.deployed
+
+
+def  test_shared_network(project, openstack):
+    """
+        Create a shared network as one tenant and add ports to it as another tenant
+    """
+    tenant1 = openstack.get_project("tenant1")
+    tenant2 = openstack.get_project("tenant2")
+    net_name = tenant1.get_resource_name("net")
+    port_name = tenant2.get_resource_name("port")
+    key_name = tenant2.get_resource_name("key")
+    server_name = tenant2.get_resource_name("server").replace("_", "-")
+
+    # create a shared network in tenant1
+    project.compile("""
+    import unittest
+    import openstack
+
+    tenant = "%(project)s"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="%(name)s", project=project, shared=true)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
+                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
+            """ % {"name": net_name, "project": tenant1._tenant})
+
+    project.deploy_resource("openstack::Network", name=net_name)
+    project.deploy_resource("openstack::Subnet", name=net_name)
+
+    # create a hostport on the shared network in tenant2
+    project.compile("""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "%(project)s"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n1 = openstack::Network(provider=p, name="%(net_name)s", project=project, managed=false)
+    s1 = openstack::Subnet(provider=p, project=project, network=n1, dhcp=true, name="%(net_name)s",
+                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=false)
+
+    n2 = openstack::Network(provider=p, name="%(net_name)s2", project=project, managed=true)
+    s2 = openstack::Subnet(provider=p, project=project, network=n2, dhcp=true, name="%(net_name)s2",
+                           network_address="10.255.254.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=true)
+
+    os = std::OS(name="cirros", version="0.4", family=std::linux)
+    key = ssh::Key(name="%(key_name)s", public_key="")
+    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,
+                         image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
+                         subnet=s2)
+    port = openstack::HostPort(provider=p, vm=vm.vm, subnet=s1, name="%(server_name)s_eth1", address="10.255.255.123",
+                               project=project, port_index=2, purged=false, dhcp=false)
+            """ % {"net_name": net_name, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
+
+    project.deploy_resource("openstack::Network", name=net_name + "2")
+    project.deploy_resource("openstack::Subnet", name=net_name + "2")
+    project.deploy_resource("openstack::VirtualMachine")
+    project.deploy_resource("openstack::HostPort")
+
+    project.compile("""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "%(project)s"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n1 = openstack::Network(provider=p, name="%(net_name)s", project=project, managed=false)
+    s1 = openstack::Subnet(provider=p, project=project, network=n1, dhcp=true, name="%(net_name)s",
+                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=false)
+
+    n2 = openstack::Network(provider=p, name="%(net_name)s2", project=project, managed=true)
+    s2 = openstack::Subnet(provider=p, project=project, network=n2, dhcp=true, name="%(net_name)s2",
+                           network_address="10.255.254.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=true)
+
+    n3 = openstack::Network(provider=p, name="%(net_name)s3", project=project, managed=true)
+    s3 = openstack::Subnet(provider=p, project=project, network=n3, dhcp=true, name="%(net_name)s3",
+                           network_address="10.255.253.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=true)
+
+    os = std::OS(name="cirros", version="0.4", family=std::linux)
+    key = ssh::Key(name="%(key_name)s", public_key="")
+    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,
+                         image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
+                         subnet=s2)
+
+    openstack::HostPort(provider=p, vm=vm.vm, subnet=s1, name="%(server_name)s_eth1", address="10.255.255.123",
+                        project=project, port_index=2, purged=false, dhcp=false)
+
+    openstack::HostPort(provider=p, vm=vm.vm, subnet=s3, name="%(server_name)s_eth2", address="10.255.253.12",
+                        project=project, port_index=3, purged=false, dhcp=false)
+            """ % {"net_name": net_name, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
+
+    project.deploy_resource("openstack::Network", name=net_name + "3")
+    project.deploy_resource("openstack::Subnet", name=net_name + "3")
+    project.deploy_resource("openstack::HostPort", name=server_name+"_eth2")
