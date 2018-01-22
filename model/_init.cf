@@ -17,8 +17,9 @@
 """
 import ip
 import ip::services
-import ssh
+import net
 import platform
+import ssh
 
 entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
 end
@@ -56,7 +57,9 @@ entity Project extends OpenStackResource:
     string description=""
 end
 index Project(provider, name)
-Project projects [0:] -- [1] Provider provider
+
+Project.provider [1] -- Provider.projects [0:]
+
 implement Project using std::none
 
 entity User extends OpenStackResource:
@@ -78,7 +81,7 @@ entity User extends OpenStackResource:
     string password=""
 end
 index User(provider, name)
-User users [0:] -- [1] Provider provider
+User.provider [1] -- Provider.users [0:]
 implement User using std::none
 
 entity Role extends OpenStackResource:
@@ -92,18 +95,18 @@ entity Role extends OpenStackResource:
     string role_id
     string role
 end
-Role roles [0:] -- [1] Provider provider
+Role.provider [1] -- Provider.roles [0:]
 implement Role using roleImpl
 
 """
     Each project can have multiple roles
 """
-Role roles [0:] -- [1] Project project
+Role.project [1] -- Project.roles [0:]
 
 """
     Each user can have multiple roles
 """
-Role roles [0:] -- [1] User user
+Role.user [1] -- User.roles [0:]
 
 implementation roleImpl for Role:
     self.requires = self.project
@@ -131,8 +134,8 @@ entity EndPoint extends OpenStackResource:
     string service_id
 end
 implement EndPoint using endPoint
-Service service [1] -- [0:1] EndPoint endpoint
-EndPoint endpoints [0:] -- [1] Provider provider
+Service.endpoint [0:1] -- EndPoint.service [1]
+EndPoint.provider [1] -- Provider.endpoints [0:]
 
 implementation endPoint for EndPoint:
     self.provider = self.service.provider
@@ -167,10 +170,25 @@ entity Port extends OpenStackResource:
         A port on a network
     """
     ip::ip address
+
 end
 
-Port ports [0:] -- [1] Provider provider
-Project project [1] -- [0:] Port ports
+entity AddressPair:
+    """
+        An address pair that is added to a host port
+
+        :attr address: The address range that is allowed on this port (network interface)
+        :attr mac_addr: An optional mac address. When omitted, the mac address of this port is used by neutron.
+    """
+    ip::cidr address
+    net::mac_addr? mac
+end
+
+implement AddressPair using std::none
+
+Port.provider [1] -- Provider.ports [0:]
+Port.project [1] -- Project.ports [0:]
+Port.allowed_address_pairs [0:] -- AddressPair
 
 entity RouterPort extends Port:
     """
@@ -183,7 +201,7 @@ index RouterPort(router, subnet)
 
 implement RouterPort using std::none
 
-Subnet subnet [0:1] -- [0:] RouterPort routers
+RouterPort.subnet [0:1] -- Subnet.routers [0:]
 
 entity HostPort extends Port:
     """
@@ -207,8 +225,8 @@ end
 
 implement HostPort using std::none
 
-Subnet subnet [1] -- [0:] HostPort host_ports
-VirtualMachine vm [1] -- [0:] HostPort ports
+HostPort.subnet [1] -- Subnet.host_ports [0:]
+HostPort.vm [1] -- VirtualMachine.ports [0:]
 
 index HostPort(provider, name)
 
@@ -228,9 +246,9 @@ implement Subnet using std::none
 
 index Subnet(name)
 
-Provider provider [1] -- [0:] Subnet subnets
-Project project [1] -- [0:] Subnet subnets
-Network network [1] -- [0:] Subnet subnets
+Subnet.provider [1] -- Provider.subnets [0:]
+Subnet.project [1] -- Project.subnets [0:]
+Subnet.network [1] -- Network.subnets [0:]
 
 entity Route:
     """
@@ -255,12 +273,12 @@ index Router(name)
 
 implement Router using std::none
 
-Router routers [0:] -- [1] Provider provider
-Router router [0:1] -- [0:] RouterPort ports
-Router router [0:1] -- [0:] Subnet subnets
-Router routers [0:] -- [0:1] Network ext_gateway
-Router router [0:1] -- [0:] Route routes
-Project project [1] -- [0:] Router routers
+Router.provider [1] -- Provider.routers [0:]
+Router.project [1] -- Project.routers [0:]
+Router.ports [0:] -- RouterPort.router [0:1]
+Router.subnets [0:] -- Subnet.router [0:1]
+Router.ext_gateway [0:1] -- Network.routers [0:]
+Router.routes [0:1] -- Router.router [0:1]
 
 ## Nova config
 typedef direction as string matching self == "ingress" or self == "egress"
