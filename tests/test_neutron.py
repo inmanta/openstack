@@ -531,7 +531,6 @@ def test_allowed_addr_port(project, openstack):
     key_name = tenant1.get_resource_name("key")
     server_name = tenant1.get_resource_name("server").replace("_", "-")
 
-    # create a shared network in tenant1
     project.compile("""
     import unittest
     import openstack
@@ -567,3 +566,6 @@ def test_allowed_addr_port(project, openstack):
     ports = tenant1.neutron.list_ports(name=port_name)["ports"]
     assert len(ports) == 1
     assert len(ports[0]["allowed_address_pairs"]) == 2
+
+    # recheck the config
+    project.deploy_resource("openstack::HostPort", name=port_name)

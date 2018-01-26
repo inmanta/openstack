@@ -1401,7 +1401,8 @@ class HostPortHandler(OpenStackHandler):
                 # Port security is not enabled in the API, but resource wants to disable it.
                 ctx.warning("Ignoring portsecurity is False because extension is not enabled.")
 
-        resource.allowed_address_pairs = []
+        resource.allowed_address_pairs = {}
+        print(port)
         if len(port["allowed_address_pairs"]) > 0:
             for pair in port["allowed_address_pairs"]:
                 resource.allowed_address_pairs[pair["ip_address"]] = pair["mac_address"]
