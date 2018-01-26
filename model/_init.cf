@@ -299,7 +299,11 @@ end
 
 index SecurityGroup(project, name)
 
-implement SecurityGroup using std::none
+implement SecurityGroup using sg
+
+implementation sg for SecurityGroup:
+    self.requires = self.project
+end
 
 SecurityGroup security_groups [0:] -- [1] Provider provider
 SecurityGroup security_groups [0:] -- [1] Project project
@@ -334,16 +338,22 @@ SecurityRule rules [0:] -- [1] SecurityGroup group
 
 entity FloatingIP extends OpenStackResource:
     string name
+    ip::ip address
+    bool force_ip=false
 end
 
 implementation fipName for FloatingIP:
     # We need a consistent and unique name to identity the fip
     self.name = "{{external_network.name}}_{{port.name}}"
-#    neutron::validate_floatingip_attachment()
 end
 index FloatingIP(external_network, port)
 
+implementation fipAddr for FloatingIP:
+    self.address = std::getfact(self, "ip_address")
+end
+
 implement FloatingIP using fipName
+implement FloatingIP using fipAddr when not force_ip
 
 FloatingIP floating_ips [0:] -- [1] Project project
 FloatingIP floating_ips [0:] -- [1] Provider provider

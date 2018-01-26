@@ -362,7 +362,7 @@ class FloatingIP(OpenstackResource):
     """
         A floating ip
     """
-    fields = ("name", "port", "external_network")
+    fields = ("name", "port", "external_network", "address")
 
     @staticmethod
     def get_port(_, fip):
@@ -371,6 +371,11 @@ class FloatingIP(OpenstackResource):
     @staticmethod
     def get_external_network(_, fip):
         return fip.external_network.name
+
+    def get_address(_, fip):
+        if fip.force_ip:
+            return fip.address
+        return None
 
 
 class KeystoneResource(PurgeableResource, ManagedResource):
@@ -1733,13 +1738,22 @@ class FloatingIPHandler(OpenStackHandler):
             raise SkipResource("Unable to finx external network")
 
         available_fips = self._find_available_fips(project_id, network_id)
+        fip_id = None
         if len(available_fips) > 0:
-            fip_id = available_fips[0]["id"]
+            if resource.address is not None:
+                for fip in available_fips:
+                    if fip["floating_ip_address"] == resource.address:
+                        fip_id = fip["id"]
+            else:
+                fip_id = available_fips[0]["id"]
+
+        if fip_id:
             self._neutron.update_floatingip(fip_id, {"floatingip": {"port_id": port_id, "description": resource.name}})
 
         else:
             self._neutron.create_floatingip({"floatingip": {"port_id": port_id, "floating_network_id": network_id,
-                                                            "description": resource.name}})
+                                                            "description": resource.name,
+                                                            "floating_ip_address": resource.address}})
 
         ctx.set_created()
 
