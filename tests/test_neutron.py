@@ -378,7 +378,7 @@ openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="tcp", port=22
 openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="all", remote_prefix="0.0.0.0/0")
 
 
-os = std::OS(name="cirros", version="0.4", family=std::linux)
+os = std::OS(name="cirros", version=0.4, family=std::linux)
 
 key = ssh::Key(name="%(name)s", public_key="%(key)s")
 net = openstack::Network(provider=p, project=project, name="%(name)s")
@@ -468,7 +468,7 @@ def  test_shared_network(project, openstack):
     s2 = openstack::Subnet(provider=p, project=project, network=n2, dhcp=true, name="%(net_name)s2",
                            network_address="10.255.254.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=true)
 
-    os = std::OS(name="cirros", version="0.4", family=std::linux)
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
     key = ssh::Key(name="%(key_name)s", public_key="")
     vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,
                          image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
@@ -503,7 +503,7 @@ def  test_shared_network(project, openstack):
     s3 = openstack::Subnet(provider=p, project=project, network=n3, dhcp=true, name="%(net_name)s3",
                            network_address="10.255.253.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=true)
 
-    os = std::OS(name="cirros", version="0.4", family=std::linux)
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
     key = ssh::Key(name="%(key_name)s", public_key="")
     vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,
                          image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
@@ -519,3 +519,53 @@ def  test_shared_network(project, openstack):
     project.deploy_resource("openstack::Network", name=net_name + "3")
     project.deploy_resource("openstack::Subnet", name=net_name + "3")
     project.deploy_resource("openstack::HostPort", name=server_name+"_eth2")
+
+
+def test_allowed_addr_port(project, openstack):
+    """
+        Test creating a port with allowed address pairs
+    """
+    tenant1 = openstack.get_project("tenant1")
+    net_name = tenant1.get_resource_name("net")
+    port_name = tenant1.get_resource_name("port")
+    key_name = tenant1.get_resource_name("key")
+    server_name = tenant1.get_resource_name("server").replace("_", "-")
+
+    project.compile("""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "%(project)s"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="%(name)s", project=project)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
+                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
+
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
+    key = ssh::Key(name="%(key_name)s", public_key="")
+
+    vm = openstack::VirtualMachine(provider=p, project=project, key_pair=key, name="%(server_name)s",
+                                   image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="")
+
+    p1 = openstack::AddressPair(address="10.255.255.0/24")
+    p2 = openstack::AddressPair(address="10.255.0.0/24", mac="12:23:34:45:56:67")
+    port = openstack::HostPort(provider=p, project=project, name="%(port_name)s", subnet=subnet, address="10.255.255.10",
+                               dhcp=false, allowed_address_pairs=[p1, p2], vm=vm)
+    vm.eth0_port = port
+            """ % {"name": net_name, "project": tenant1._tenant, "port_name": port_name, "server_name": server_name,
+                   "key_name": key_name})
+
+    project.deploy_resource("openstack::Network", name=net_name)
+    project.deploy_resource("openstack::Subnet", name=net_name)
+    project.deploy_resource("openstack::VirtualMachine", name=server_name)
+    project.deploy_resource("openstack::HostPort", name=port_name)
+
+    ports = tenant1.neutron.list_ports(name=port_name)["ports"]
+    assert len(ports) == 1
+    assert len(ports[0]["allowed_address_pairs"]) == 2
+
+    # recheck the config
+    project.deploy_resource("openstack::HostPort", name=port_name)

@@ -25,7 +25,7 @@ import math
 
 from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
-from inmanta import resources
+from inmanta import resources, ast
 from inmanta.agent import handler
 from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
@@ -251,33 +251,11 @@ class Router(OpenstackResource):
         return [p.name for p in router.ports]
 
 
-@resource("openstack::RouterPort", agent="provider.name", id_attribute="name")
-class RouterPort(OpenstackResource):
+class Port(OpenstackResource):
     """
-        A port in a router
+        A generic port
     """
-    fields = ("name", "address", "subnet", "router", "network")
-
-    @staticmethod
-    def get_subnet(_, port):
-        return port.subnet.name
-
-    @staticmethod
-    def get_network(_, port):
-        return port.subnet.network.name
-
-    @staticmethod
-    def get_router(_, port):
-        return port.router.name
-
-
-@resource("openstack::HostPort", agent="provider.name", id_attribute="name")
-class HostPort(OpenstackResource):
-    """
-        A port in a router
-    """
-    fields = ("name", "address", "subnet", "host", "network", "portsecurity", "dhcp", "port_index",
-              "retries", "wait")
+    fields = ("name", "address", "subnet", "network")
 
     @staticmethod
     def get_address(exporter, port):
@@ -294,9 +272,40 @@ class HostPort(OpenstackResource):
     def get_network(_, port):
         return port.subnet.network.name
 
+
+@resource("openstack::RouterPort", agent="provider.name", id_attribute="name")
+class RouterPort(Port):
+    """
+        A port in a router
+    """
+    fields = ("name", "address", "subnet", "router", "network")
+
+    @staticmethod
+    def get_router(_, port):
+        return port.router.name
+
+
+@resource("openstack::HostPort", agent="provider.name", id_attribute="name")
+class HostPort(Port):
+    """
+        A port in a router
+    """
+    fields = ("host", "portsecurity", "dhcp", "port_index", "retries", "wait", "allowed_address_pairs")
+
     @staticmethod
     def get_host(_, port):
         return port.vm.name
+
+    @staticmethod
+    def get_allowed_address_pairs(_, port):
+        pairs = {}
+        for pair in port.allowed_address_pairs:
+            try:
+                pairs[pair.address] = pair.mac
+            except ast.OptionalValueException:
+                pairs[pair.address] = None
+
+        return pairs
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
@@ -646,7 +655,8 @@ class OpenStackHandler(CRUDHandler):
             return subnets["subnets"][0]
 
     def get_router(self, project_id=None, name=None, router_id=None):
-        """
+        """[{'allowed_address_pairs': [], 'extra_dhcp_opts': [], 'updated_at': '2018-01-22T13:29:25Z', 'device_owner': 'compute:nova', 'revision_number': 8, 'port_security_enabled': True, 'binding:profile': {}, 'fixed_ips': [{'subnet_id': 'aad30b7b-ab7b-441b-843f-8cef149ef4a1', 'ip_address': '10.255.255.10'}], 'id': 'd36a6022-652f-4d95-bae4-7301fb6a2b32', 'security_groups': ['0625ff63-dbca-4078-ad50-ba2bce935c64'], 'binding:vif_details': {'port_filter': True}, 'binding:vif_type': 'bridge', 'mac_address': 'fa:16:3e:f3:e7:2b', 'project_id': '727f8247b37f4199884676d19fef05cc', 'status': 'ACTIVE', 'binding:host_id': 'node1.inmanta.com', 'description': '', 'tags': [], 'device_id': 'fd290dc1-962c-4b12-9994-09f08aa76fa1', 'name': 'inmanta_unit_test_port', 'admin_state_up': True, 'network_id': '5dedda95-82d4-4a3a-9b8f-fa9a9c9e1997', 'tenant_id': '727f8247b37f4199884676d19fef05cc', 'created_at': '2018-01-22T13:29:21Z', 'binding:vnic_type': 'normal'}]
+
             Retrieve the router id based on the name of the network
         """
         query = {}
@@ -1345,10 +1355,6 @@ class HostPortHandler(OpenStackHandler):
         raise SkipResource("Unable to create host port because vm is not in active state (current %s)" % vm_state)
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        if resource.purged:
-            # Most stuff below here will err eventually
-            return
-
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
             raise SkipResource("Cannot create  a host port when project id is not yet known.")
@@ -1395,6 +1401,12 @@ class HostPortHandler(OpenStackHandler):
                 # Port security is not enabled in the API, but resource wants to disable it.
                 ctx.warning("Ignoring portsecurity is False because extension is not enabled.")
 
+        resource.allowed_address_pairs = {}
+        print(port)
+        if len(port["allowed_address_pairs"]) > 0:
+            for pair in port["allowed_address_pairs"]:
+                resource.allowed_address_pairs[pair["ip_address"]] = pair["mac_address"]
+
         resource.name = port["name"]
 
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
@@ -1414,6 +1426,15 @@ class HostPortHandler(OpenStackHandler):
             if (not ctx.contains("portsecurity") or ctx.get("portsecurity")) and not resource.portsecurity:
                 body_value["port"]["port_security_enabled"] = False
                 body_value["port"]["security_groups"] = None
+
+            if len(resource.allowed_address_pairs) > 0:
+                body_value["port"]["allowed_address_pairs"] = []
+                for ip, mac in resource.allowed_address_pairs.items():
+                    pair = {"ip_address": ip}
+                    if mac is not None:
+                        pair["mac_address"] = mac
+
+                    body_value["port"]["allowed_address_pairs"].append(pair)
 
             result = self._neutron.create_port(body=body_value)
 
@@ -1437,7 +1458,6 @@ class HostPortHandler(OpenStackHandler):
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         port = ctx.get("port")
-
         try:
             if ctx.get("portsecurity") and "portsecurity" in changes:
                 if not changes["portsecurity"]["desired"]:
@@ -1451,6 +1471,18 @@ class HostPortHandler(OpenStackHandler):
             if "name" in changes:
                 self._neutron.update_port(port=port["id"], body={"port": {"name": resource.name}})
                 del changes["name"]
+
+            if "allowed_address_pairs" in changes:
+                allowed_address_pairs = []
+                for ip, mac in resource.allowed_address_pairs.items():
+                    pair = {"ip_address": ip}
+                    if mac is not None:
+                        pair["mac_address"] = mac
+
+                    allowed_address_pairs.append(pair)
+
+                self._neutron.update_port(port=port["id"], body={"port": {"allowed_address_pairs": allowed_address_pairs}})
+                del changes["allowed_address_pairs"]
 
             if len(changes) > 0:
                 raise SkipResource("not implemented, %s" % changes)
