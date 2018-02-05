@@ -1362,7 +1362,7 @@ class HostPortHandler(OpenStackHandler):
             tries += 1
             time.sleep(resource.wait)
 
-        raise SkipResource("Unable to create host port because vm is not in active state (current %s)" % vm_state)
+        raise SkipResource("Unable to create host port because vm is not in active state")
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
