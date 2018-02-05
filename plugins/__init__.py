@@ -239,7 +239,12 @@ class Router(OpenstackResource):
 
     @staticmethod
     def get_routes(_, router):
-        routes = {route.destination: route.nexthop for route in router.routes}
+        routes = {}
+        for route in router.routes:
+            try:
+                routes[route.destination] = route.nexthop
+            except proxy.UnknownException:
+                pass
         return routes
 
     @staticmethod
