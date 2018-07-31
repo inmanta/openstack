@@ -47,6 +47,10 @@ end
 implement Provider using std::none
 implement Provider using agentConfig when auto_agent
 
+implementation providerRequire for OpenStackResource:
+    self.requires += self.provider.requires
+end
+
 ## Keystone config
 entity Project extends OpenStackResource:
     """
@@ -60,7 +64,7 @@ index Project(provider, name)
 
 Project.provider [1] -- Provider.projects [0:]
 
-implement Project using std::none
+implement Project using providerRequire
 
 entity User extends OpenStackResource:
     """
@@ -82,7 +86,7 @@ entity User extends OpenStackResource:
 end
 index User(provider, name)
 User.provider [1] -- Provider.users [0:]
-implement User using std::none
+implement User using providerRequire
 
 entity Role extends OpenStackResource:
     """
@@ -96,7 +100,7 @@ entity Role extends OpenStackResource:
     string role
 end
 Role.provider [1] -- Provider.roles [0:]
-implement Role using roleImpl
+implement Role using roleImpl, providerRequire
 
 """
     Each project can have multiple roles
@@ -122,7 +126,7 @@ entity Service extends OpenStackResource:
     string type
     string description
 end
-implement Service using std::none
+implement Service using providerRequire
 Service services [0:] -- [1] Provider provider
 index Service(provider, name, type)
 
@@ -133,7 +137,7 @@ entity EndPoint extends OpenStackResource:
     string admin_url
     string service_id
 end
-implement EndPoint using endPoint
+implement EndPoint using endPoint, providerRequire
 Service.endpoint [0:1] -- EndPoint.service [1]
 EndPoint.provider [1] -- Provider.endpoints [0:]
 
@@ -163,14 +167,13 @@ Project project [1] -- [0:] Network networks
 
 index Network(provider, name)
 
-implement Network using std::none
+implement Network using providerRequire
 
 entity Port extends OpenStackResource:
     """
         A port on a network
     """
     ip::ip address
-
 end
 
 entity AddressPair:
@@ -199,7 +202,7 @@ end
 
 index RouterPort(router, subnet)
 
-implement RouterPort using std::none
+implement RouterPort using providerRequire
 
 RouterPort.subnet [0:1] -- Subnet.routers [0:]
 
@@ -223,7 +226,7 @@ entity HostPort extends Port:
     number wait=5
 end
 
-implement HostPort using std::none
+implement HostPort using providerRequire
 
 HostPort.subnet [1] -- Subnet.host_ports [0:]
 HostPort.vm [1] -- VirtualMachine.ports [0:]
@@ -242,7 +245,7 @@ entity Subnet extends OpenStackResource:
     ip::ip[] dns_servers=[]
 end
 
-implement Subnet using std::none
+implement Subnet using providerRequire
 
 index Subnet(name)
 
@@ -271,7 +274,7 @@ end
 
 index Router(name)
 
-implement Router using std::none
+implement Router using providerRequire
 
 Router.provider [1] -- Provider.routers [0:]
 Router.project [1] -- Project.routers [0:]
@@ -299,7 +302,7 @@ end
 
 index SecurityGroup(project, name)
 
-implement SecurityGroup using sg
+implement SecurityGroup using sg, providerRequire
 
 implementation sg for SecurityGroup:
     self.requires = self.project
@@ -352,7 +355,7 @@ implementation fipAddr for FloatingIP:
     self.address = std::getfact(self, "ip_address")
 end
 
-implement FloatingIP using fipName
+implement FloatingIP using fipName, providerRequire
 implement FloatingIP using fipAddr when not force_ip
 
 FloatingIP floating_ips [0:] -- [1] Project project
@@ -371,7 +374,7 @@ end
 entity VirtualMachine extends OpenStackResource, VMAttributes:
     string name
 end
-implement VirtualMachine using std::none
+implement VirtualMachine using providerRequire
 
 index VirtualMachine(provider, name)
 
