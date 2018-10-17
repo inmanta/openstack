@@ -105,7 +105,7 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
         Find the flavor that matches the closest to the resources requested.
 
         :param vcpus: The number of virtual cpus in the flavor
-        :param ram: The amount of ram in megabyte
+        :param ram: The amount of ram in gigabyte
         :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
     """
     global FLAVORS
