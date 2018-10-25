@@ -59,11 +59,13 @@ class Project(object):
     """
         An project instance
     """
-    def __init__(self, tester: "OpenstackTester", auth_url: str, username: str, password: str, tenant: str):
+    def __init__(self, tester: "OpenstackTester", auth_url: str, username: str, password: str, tenant: str, domain:str):
         self._auth_url = auth_url
         self._username = username
         self._password = password
         self._tenant = tenant
+        self._domain = domain
+
         self._session_obj = None
         self._nova = None
         self._keystone = None
@@ -74,7 +76,7 @@ class Project(object):
     def session(self):
         if self._session_obj is None:
             auth = v3.Password(auth_url=self._auth_url, username=self._username, password=self._password,
-                               project_name=self._tenant, user_domain_id="default", project_domain_id="default")
+                               project_name=self._tenant, user_domain_name=self._domain, project_domain_name=self._domain)
             self._session_obj = keystone_session.Session(auth=auth)
         return self._session_obj
 
@@ -99,23 +101,37 @@ class Project(object):
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
 
+    def assert_network(self, name: str) -> None:
+        project_id = self.project_object.id
+        inproject = self.neutron.list_networks(project_id=project_id)["networks"]
+        for net in inproject:
+            if net["name"] == name:
+                return
+
+        print(inproject)
+        assert False, "could not find %s in %s"%(name, inproject)
+
+    def assert_subnet(self, name: str) -> None:
+        project_id = self.project_object.id
+        inproject = self.neutron.list_subnets(project_id=project_id)["subnets"]
+        for net in inproject:
+            if net["name"] == name:
+                return
+
+        print(inproject)
+        assert False, "could not find %s in %s"%(name, inproject)
+
 
 class OpenstackTester(object):
     """
         Object that provides access to an openstack and performs cleanup
     """
-    def __init__(self):
+    def __init__(self, auth_url, username, password, tenant, domain):
         self._projects = {}
-        self._admin = None
-
+        self._admin = Project(self, auth_url, username, password, tenant, domain)
+    
     @property
-    def admin(self):
-        if self._admin is None:
-            auth_url = os.environ["OS_AUTH_URL"]
-            username = os.environ["OS_USERNAME"]
-            password = os.environ["OS_PASSWORD"]
-            tenant = os.environ["OS_PROJECT_NAME"]
-            self._admin = Project(self, auth_url, username, password, tenant)
+    def admin(self):            
         return self._admin
 
     def get_resource_name(self, name: str) -> str:
@@ -129,23 +145,26 @@ class OpenstackTester(object):
             return self._projects[name]
 
         prefixed_tenant = self.get_resource_name(name)
-        auth_url = os.environ["OS_AUTH_URL"]
-        username = os.environ["OS_USERNAME"]
-        password = os.environ["OS_PASSWORD"]
-        prj = Project(self, auth_url, username, password, prefixed_tenant)
+        auth_url = self.admin._auth_url
+        username = self.admin._username
+        password = self.admin._password
+        domain = self.admin._domain
+        prj = Project(self, auth_url, username, password, prefixed_tenant, domain)
 
         self._projects[name] = prj
 
+        domainobject = self.admin.keystone.domains.find(name=domain)
         # create the project and add the user to that project
         try:
-            project = self.admin.keystone.projects.find(name=prefixed_tenant)
+            project = self.admin.keystone.projects.find(name=prefixed_tenant, domain_id=domainobject.id)
             prj.project_object = project
-
+            print("Found project ", self.admin._domain, prefixed_tenant, project)
             self.clean_project(prj)
         except exceptions.http.NotFound:
+            print("Creating project ", self.admin._domain, prefixed_tenant)
             # create the project
             project = self.admin.keystone.projects.create(prefixed_tenant, description="Unit test project", enabled=True,
-                                                          domain="default")
+                                                          domain=domainobject)
             prj.project_object = project
 
         # get the member role
@@ -206,7 +225,12 @@ class OpenstackTester(object):
 
 @pytest.fixture(scope="function")
 def openstack():
-    ost = OpenstackTester()
+    ost = OpenstackTester(
+            auth_url = os.environ["OS_AUTH_URL"],
+            username = os.environ["OS_USERNAME"],
+            password = os.environ["OS_PASSWORD"],
+            tenant = os.environ["OS_PROJECT_NAME"],
+            domain = "default")
 
     yield ost
 
