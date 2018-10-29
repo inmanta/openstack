@@ -22,12 +22,14 @@ import logging
 import time
 import datetime
 import math
+import typing
+
 
 from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources, ast
 from inmanta.agent import handler
-from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
+from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler, HandlerContext
 from inmanta.export import dependency_manager
 from inmanta.plugins import plugin
 
@@ -42,6 +44,10 @@ from keystoneauth1 import session
 from keystoneclient.v3 import client as keystone_client
 
 from glanceclient import client as glance_client
+
+from openstack import connection
+
+
 
 try:
     from keystoneclient.exceptions import NotFound
@@ -134,6 +140,106 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
     return selected[1].name
 
 
+class OpenStackReference(object):
+
+    def to_dict(self):
+        return vars(self)
+
+    def __repr__(self):
+        return "%s(%s)"%(self.__class__.__name__, ",".join(sorted(["%s='%s'"%(k,v) for k,v in self.to_dict().items()])))
+
+    @classmethod
+    def from_dict(cls, input):
+        raise NotImplementedError
+
+    def diff(self, other):
+        raise NotImplementedError
+
+
+class UserReference(OpenStackReference):
+
+    def __init__(self,
+                 username=None,
+                 password=None,
+                 project_name=None,
+                 connection_url=None,
+                 user_domain_name=None,
+                 project_domain_name=None):
+        self.username = username
+        self.password = password
+        self.project_name = project_name
+        self.connection_url = connection_url
+        self.user_domain_name = user_domain_name
+        self.project_domain_name = project_domain_name
+
+    @classmethod
+    def from_model(cls, entity):
+        out = UserReference()
+        out.username = entity.username
+        out.password = entity.password
+        out.connection_url = entity.connection_url
+        out.project_name = entity.tenant
+        out.user_domain_name = entity.user_domain_name
+        out.project_domain_name = entity.project_domain_name
+        return out
+
+    @classmethod
+    def from_dict(cls, input):
+        return UserReference(**input)
+
+    def diff(self, other):
+        """ always part of key, can never be read """
+        return None
+    
+class ProjectReference(OpenStackReference):
+
+    def __init__(self, domain_name=None, project_name=None):
+        self.domain_name = domain_name
+        self.project_name = project_name
+
+    @classmethod
+    def from_model(cls, entity):
+        out = ProjectReference()
+        out.domain_name = entity.domain_name
+        out.project_name = entity.name
+        return out
+
+    @classmethod
+    def from_dict(cls, input):
+        return ProjectReference(**input)
+
+    def diff(self, other):
+        """ always part of key, can never be read """
+        return None
+
+
+class OpenStackResourceV2(PurgeableResource, ManagedResource):
+
+    fields = ("user", "project")
+    sub_fields = {"user":UserReference.from_dict, "project":ProjectReference.from_dict}
+
+
+    def decode(self):
+        if not hasattr(self, "_decoded"):
+            self._decoded = True
+            for field, decoder in self.sub_fields.items():
+                encoded = getattr(self, field)
+                if not isinstance(encoded, OpenStackReference):
+                    decoded = decoder(encoded)
+                    setattr(self, field, decoded)
+
+    @staticmethod
+    def get_user(exporter, resource):
+        return UserReference.from_model(resource.provider)
+
+    @staticmethod
+    def get_project(exporter, resource):
+        return ProjectReference.from_model(resource.project)
+
+    def diff(self, desired):
+        return None
+    
+
 class OpenstackResource(PurgeableResource, ManagedResource):
     fields = ("project", "admin_user", "admin_password", "admin_tenant", "auth_url")
 
@@ -204,7 +310,7 @@ class VirtualMachine(OpenstackResource):
 
 
 @resource("openstack::Network", agent="provider.name", id_attribute="name")
-class Network(OpenstackResource):
+class Network(OpenStackResourceV2):
     """
         This class represents a network in neutron
     """
@@ -377,6 +483,7 @@ class FloatingIP(OpenstackResource):
     def get_external_network(_, fip):
         return fip.external_network.name
 
+    @staticmethod
     def get_address(_, fip):
         if fip.force_ip:
             return fip.address
@@ -565,8 +672,11 @@ def openstack_dependencies(config_model, resource_model):
 
 
 CRED_TIMEOUT = 600
+KEYSTONE_TIMEOUT = 10
 RESOURCE_TIMEOUT = 10
 
+class OpenStackException(Exception):
+    pass
 
 class OpenStackHandler(CRUDHandler):
 
@@ -739,6 +849,76 @@ class OpenStackHandler(CRUDHandler):
             ctx.warning("Multiple security groups with name %(name)s exist.", name=name, groups=sgs["security_groups"])
 
         return sgs["security_groups"][0]
+
+
+class OpenStackHandlerV2(CRUDHandler):
+
+    def pre(self, ctx: HandlerContext, resource: OpenStackResourceV2) -> None:
+        resource.decode()
+
+    def _diff(self, current: OpenStackResourceV2, desired: OpenStackResourceV2) -> typing.Dict[str, typing.Dict[str, typing.Any]]:
+        """
+            Calculate the diff between the current and desired resource state.
+
+            :param current: The current state of the resource
+            :param desired: The desired state of the resource
+            :return: A dict with key the name of the field and value another dict with "current" and "desired" as keys for
+                     fields that require changes.
+        """
+        changes = {}
+
+        # check attributes
+        for field in current.__class__.fields:
+            current_value = getattr(current, field)
+            desired_value = getattr(desired, field)
+
+            if field in current.__class__.sub_fields and current_value is not None:
+                diff = current_value.diff(desired_value)
+                if diff is not None:
+                    changes[field] = diff
+            elif current_value != desired_value and desired_value is not None:
+                changes[field] = {"current": current_value, "desired": desired_value}
+
+        return changes
+
+    @cache(timeout=CRED_TIMEOUT)
+    def get_session(self, user:UserReference):
+        auth = v3.Password(
+            auth_url=user.connection_url,
+            username=user.username,
+            password=user.password,
+            project_name=user.project_name,
+            user_domain_name=user.user_domain_name,
+            project_domain_name=user.project_domain_name,
+        )
+        return session.Session(auth=auth)
+
+    @cache(timeout=CRED_TIMEOUT)
+    def get_connection(self, user:UserReference):
+        return connection.Connection(
+                session=self.get_session(user), identity_interface="public"
+            )
+
+    @cache(timeout=KEYSTONE_TIMEOUT)
+    def get_project_id(self, user:UserReference, project:ProjectReference):
+        """
+            Retrieve the id of a project based on the given name
+        """
+        connection = self.get_connection(user)
+
+        # Fallback for non admin users
+        if user.project_domain_name == project.domain_name and user.project_name == project.project_name:
+            return connection.current_project_id
+
+        try:        
+            domainobject = connection.identity.find_domain(project.domain_name, ignore_missing=False)
+            project = connection.identity.find_project(project.project_name, domain_id = domainobject.id, ignore_missing=False)
+            return project.id
+        except Exception as e:
+            raise OpenStackException("Non admin users can not manage resources in projects other then their login project, please use an admin user or create a different Provider for each project") from e
+        
+
+    
 
 
 @provider("openstack::VirtualMachine", name="openstack")
@@ -925,74 +1105,116 @@ class VirtualMachineHandler(OpenStackHandler):
 
 
 @provider("openstack::Network", name="openstack")
-class NetworkHandler(OpenStackHandler):
-    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        network = self.facts(ctx, resource)
+class NetworkHandler(OpenStackHandlerV2):
 
-        if len(network) > 0:
-            resource.purged = False
-            resource.external = network["router:external"]
-            if resource.physical_network != "":
-                resource.physical_network = network["provider:physical_network"]
+    #resource name -> openstack name
+    res_to_os = {
+        "name":"name",
+        "external":"is_router_external",
+        "shared":"is_shared",
+        "physical_network":"provider_physical_network",
+        "network_type":"provider_network_type",
+        "segmentation_id":"provider_segmentation_id"
+    }
 
-            if resource.network_type != "":
-                resource.network_type = network["provider:network_type"]
+    os_to_res = {v:k for k,v in res_to_os.items()}
 
-            if resource.segmentation_id > 0:
-                resource.segmentation_id = network["provider:segmentation_id"]
-
-            ctx.set("network_id", network["id"])
-            ctx.set("project_id", network["tenant_id"])
-
-        else:
-            raise ResourcePurged()
 
     def _create_dict(self, resource: Network, project_id):
-        net = {"name": resource.name, "tenant_id": project_id, "admin_state_up": True, "router:external": resource.external,
-               "shared": resource.shared}
+        net = {"admin_state_up": True,
+                "project_id": project_id}
 
-        if resource.physical_network != "":
-            net["provider:physical_network"] = resource.physical_network
-
-        if resource.network_type != "":
-            net["provider:network_type"] = resource.network_type
-
-        if resource.segmentation_id > 0:
-            net["provider:segmentation_id"] = resource.segmentation_id
+        for res_field, os_field in self.res_to_os.items():
+            value = getattr(resource, res_field)
+            if value != "" and value != 0:
+                net[os_field] = value
 
         return net
 
+    def _create_dict_diff(self, resource: Network, project_id, changes):
+        net = {}
+
+        for res_field in changes.keys():
+            os_field = self.res_to_os[res_field]
+            value = getattr(resource, res_field)
+            net[os_field] = value
+
+        return net
+
+    
+    def get_network(self, ctx, resource:Network):
+        project_id = self.get_project_id(resource.user, resource.project)
+        ctx.set("project_id", project_id)
+
+        networks = list(self.get_connection(resource.user).network.networks(name=resource.name, project_id=project_id))
+       
+        if len(networks) == 0:
+            return None
+
+        if len(networks) > 1:
+            ctx.warning("Multiple networks with the same name available!",
+                name=resource.name,
+                project_id=project_id)
+            return None
+
+        network = networks[0]
+        ctx.set("network_id", network.id)
+        return network
+
+
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        network = self.get_network(ctx, resource)
+
+        if network is not None:
+            resource.purged = False
+            resource.external = network.is_router_external
+            if resource.physical_network != "":
+                resource.physical_network = network.provider_physical_network
+
+            if resource.network_type != "":
+                resource.network_type = network.provider_network_type
+
+            if resource.segmentation_id > 0:
+                resource.segmentation_id = network.provider_segmentation_id
+        else:
+            raise ResourcePurged()
+
+    
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        project_id = self.get_project_id(resource, resource.project)
-        self._neutron.create_network({"network": self._create_dict(resource, project_id)})
+        project_id = ctx.get("project_id")
+        args = self._create_dict(resource, project_id)
+        ctx.info("preforming create with arguments %(changes)s", changes=args)
+        self.get_connection(resource.user).network.create_network(**args)
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         network_id = ctx.get("network_id")
-        self._neutron.delete_network(network_id)
+        self.get_connection(resource.user).network.delete_network(network_id)
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
         network_id = ctx.get("network_id")
-        self._neutron.update_network(network_id, {"network": {"name": resource.name, "router:external": resource.external}})
+        project_id = ctx.get("project_id")
 
-        ctx.fields_updated(("name", "external"))
+
+        update = self._create_dict_diff(resource, project_id, changes)
+        ctx.info("preforming update with changes %(changes)s", changes=update)
+
+        self.get_connection(resource.user).network.update_network(network_id, **update)
+
+        ctx.fields_updated(changes.keys())
         ctx.set_updated()
 
     def facts(self, ctx, resource: Network):
         try:
-            networks = self._neutron.list_networks(name=resource.name)["networks"]
-        except NotFound:
+            network = self.get_network(ctx, resource)
+            if network is None:
+                return {}
+            return network.to_dict()
+        except:
+            ctx.exception("Failed to get facts")
             return {}
 
-        if len(networks) == 0:
-            return {}
-
-        if len(networks) > 1:
-            LOGGER.warning("Multiple networks with the same name available!")
-            return {}
-
-        return networks[0]
 
 
 @provider("openstack::Router", name="openstack")

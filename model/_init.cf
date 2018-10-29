@@ -35,6 +35,10 @@ entity Provider:
     string tenant
     string token=""
     string admin_url=""
+
+    string project_domain_name="Default"
+    string user_domain_name="Default"
+
     bool auto_agent=true
 end
 
@@ -56,6 +60,7 @@ entity Project extends OpenStackResource:
     """
         A project / tenant in openstack
     """
+    string domain_name="Default"
     string name
     bool enabled=true
     string description=""

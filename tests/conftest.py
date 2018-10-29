@@ -20,13 +20,28 @@ import pytest
 
 from neutronclient.neutron import client as neutron_client
 from novaclient import client as nova_client
-from keystoneclient.auth.identity import v3
+from keystoneauth1.identity import v3
 from keystoneauth1 import session as keystone_session
 from keystoneauth1 import exceptions
 from keystoneclient.v3 import client as keystone_client
+from openstack import connection
 
+import random
+import string
 
 PREFIX = "inmanta_unit_test_"
+
+
+def random_string():
+    return "".join(
+        random.choice(string.ascii_uppercase + string.digits) for _ in range(10)
+    )
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--noclean", action="store_true", default=False, help="leave tenants after tests"
+    )
+
 
 
 @pytest.fixture(scope="session")
@@ -35,10 +50,17 @@ def session():
     username = os.environ["OS_USERNAME"]
     password = os.environ["OS_PASSWORD"]
     tenant = os.environ["OS_PROJECT_NAME"]
-    auth = v3.Password(auth_url=auth_url, username=username, password=password, project_name=tenant,
-                       user_domain_id="default", project_domain_id="default")
+    auth = v3.Password(
+        auth_url=auth_url,
+        username=username,
+        password=password,
+        project_name=tenant,
+        user_domain_id="default",
+        project_domain_id="default",
+    )
     sess = keystone_session.Session(auth=auth)
     yield sess
+
 
 @pytest.fixture(scope="session")
 def nova(session):
@@ -55,11 +77,10 @@ def keystone(session):
     yield keystone_client.Client(session=session)
 
 
-class Project(object):
-    """
-        An project instance
-    """
-    def __init__(self, tester: "OpenstackTester", auth_url: str, username: str, password: str, tenant: str, domain:str):
+class User(object):
+    def __init__(
+        self, auth_url: str, username: str, password: str, tenant: str, domain: str
+    ):
         self._auth_url = auth_url
         self._username = username
         self._password = password
@@ -67,111 +88,209 @@ class Project(object):
         self._domain = domain
 
         self._session_obj = None
-        self._nova = None
-        self._keystone = None
-        self._neutron = None
-        self.project_object = None
+        self._connection = None
+
+        self.id = None
 
     @property
     def session(self):
         if self._session_obj is None:
-            auth = v3.Password(auth_url=self._auth_url, username=self._username, password=self._password,
-                               project_name=self._tenant, user_domain_name=self._domain, project_domain_name=self._domain)
+            auth = v3.Password(
+                auth_url=self._auth_url,
+                username=self._username,
+                password=self._password,
+                project_name=self._tenant,
+                user_domain_name=self._domain,
+                project_domain_name=self._domain,
+            )
             self._session_obj = keystone_session.Session(auth=auth)
         return self._session_obj
 
     @property
-    def nova(self):
-        if self._nova is None:
-            self._nova = nova_client.Client("2", session=self.session)
-        return self._nova
+    def connection(self):
+        if self._connection is None:
+            self._connection = connection.Connection(
+                session=self.session, identity_interface="public"
+            )
+        return self._connection
+
+    def snippet(self):
+        return """openstack::Provider(
+                        name="%(domain)s%(project)s%(username)s", 
+                        connection_url="%(url)s", 
+                        username="%(username)s",
+                        password="%(pass)s", 
+                        tenant="%(project)s",
+                        project_domain_name="%(domain)s",
+                        user_domain_name="%(domain)s")"""%{
+                            "domain":self._domain,
+                            "project":self._tenant,
+                            "username":self._username,
+                            "url":self._auth_url,
+                            "pass":self._password
+                        }
+
+         
+
+
+   
+
+class Project(object):
+    """
+        An project instance
+    """
+
+    def __init__(
+        self, tester: "OpenstackTester", super_admin: User, admin: User, user: User, project_object
+    ):
+        self._user = user
+        self._admin = admin
+        self._super_admin = super_admin
+
+        self.project_object = project_object
 
     @property
-    def neutron(self):
-        if self._neutron is None:
-            self._neutron = neutron_client.Client("2.0", session=self.session)
-        return self._neutron
+    def project_id(self):
+        return self.project_object.id
 
-    @property
-    def keystone(self):
-        if self._keystone is None:
-            self._keystone = keystone_client.Client(session=self.session)
-        return self._keystone
 
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
 
+    def grant(self, user:User, role="member"):
+        #don't include domain, as it will fail when user and project are not in the same domain
+        self._super_admin.connection.grant_role(
+            role, user=user.id, project=self.project_object.id
+        )
+
     def assert_network(self, name: str) -> None:
         project_id = self.project_object.id
-        inproject = self.neutron.list_networks(project_id=project_id)["networks"]
-        for net in inproject:
-            if net["name"] == name:
-                return
+        inproject = self._admin.connection.network.find_network(name, project_id=project_id)
+        return inproject
 
-        print(inproject)
-        assert False, "could not find %s in %s"%(name, inproject)
+    # def assert_subnet(self, name: str) -> None:
+    #     project_id = self.project_object.id
+    #     inproject = self.neutron.list_subnets(project_id=project_id)["subnets"]
+    #     for net in inproject:
+    #         if net["name"] == name:
+    #             return
 
-    def assert_subnet(self, name: str) -> None:
-        project_id = self.project_object.id
-        inproject = self.neutron.list_subnets(project_id=project_id)["subnets"]
-        for net in inproject:
-            if net["name"] == name:
-                return
-
-        print(inproject)
-        assert False, "could not find %s in %s"%(name, inproject)
+    #     print(inproject)
+    #     assert False, "could not find %s in %s" % (name, inproject)
 
 
 class OpenstackTester(object):
     """
         Object that provides access to an openstack and performs cleanup
     """
+
     def __init__(self, auth_url, username, password, tenant, domain):
         self._projects = {}
-        self._admin = Project(self, auth_url, username, password, tenant, domain)
-    
+        self._admin = User(auth_url, username, password, tenant, domain)
+
     @property
-    def admin(self):            
+    def admin(self):
         return self._admin
 
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
 
-    def get_project(self, name):
+    def get_shared_project(self) -> Project:
+        return self.get_project("shared")
+
+    def get_shared_project_d2(self) -> Project:
+        return self.get_project("shared", domain="inmanta-test-domain1")
+
+    def get_project(self, name, domain="default"):
         """
             Get a project with the given name (will be prefixed!). If it already exists a reference is returned
         """
-        if name in self._projects:
-            return self._projects[name]
+        key = domain + "|" + name
+        if key in self._projects:
+            return self._projects[key]
 
         prefixed_tenant = self.get_resource_name(name)
-        auth_url = self.admin._auth_url
-        username = self.admin._username
-        password = self.admin._password
-        domain = self.admin._domain
-        prj = Project(self, auth_url, username, password, prefixed_tenant, domain)
 
-        self._projects[name] = prj
+        # domain
+        domainobject = self.admin.connection.identity.find_domain(domain)
+        if domainobject is None:
+            domainobject = self.admin.connection.create_domain(
+                domain, description="Unit test domain"
+            )
+        assert domainobject is not None
 
-        domainobject = self.admin.keystone.domains.find(name=domain)
-        # create the project and add the user to that project
-        try:
-            project = self.admin.keystone.projects.find(name=prefixed_tenant, domain_id=domainobject.id)
-            prj.project_object = project
-            print("Found project ", self.admin._domain, prefixed_tenant, project)
+        # project
+        projectobject = self.admin.connection.identity.find_project(
+            prefixed_tenant, domain_id=domainobject.id
+        )
+        clean_project = False
+        if projectobject is not None:
+            print("Found project ", domain, prefixed_tenant)
+            clean_project = True
+        else:
+            print("Created project ", domain, prefixed_tenant)
+            projectobject = self.admin.connection.identity.create_project(
+                name=prefixed_tenant,
+                description="Unit test project",
+                enabled=True,
+                domain_id=domainobject.id,
+            )
+
+        # users
+        def grant(user_id, role):
+            #don't include domain, as it will fail when user and project are not in the same domain
+            self.admin.connection.grant_role(
+                role, user=user_id, project=projectobject.id
+            )
+
+        def make_user_if_required(name):
+            user = self._admin.connection.get_user(name, domain_id=domainobject.id)
+            passwd = name
+
+            userobject = User(
+                    auth_url=self.admin._auth_url,
+                    username=name,
+                    password=passwd,
+                    tenant=projectobject.name,
+                    domain=domainobject.name,
+                )
+
+            if user is not None:
+                userobject.id = user.id
+                return user, userobject
+           
+            user = self._admin.connection.create_user(
+                name,
+                password=passwd,
+                email="xx@example.org",
+                default_project=projectobject.id,
+                enabled=True,
+                domain_id=domainobject.id,
+                description="testuser"
+            )
+            assert user is not None
+            userobject.id = user.id
+            return (
+                user,
+                userobject
+            )
+
+        grant(self._admin.connection.current_user_id, "admin")
+        admin, admin_user = make_user_if_required(prefixed_tenant + "admin")
+        grant(admin.id, "admin")
+        user, user_user = make_user_if_required(prefixed_tenant + "user")
+        grant(user.id, "member")
+
+        prj = Project(self, 
+        project_object=projectobject,
+        super_admin = self.admin, 
+        admin=admin_user,
+        user = user_user)
+
+        if clean_project:
             self.clean_project(prj)
-        except exceptions.http.NotFound:
-            print("Creating project ", self.admin._domain, prefixed_tenant)
-            # create the project
-            project = self.admin.keystone.projects.create(prefixed_tenant, description="Unit test project", enabled=True,
-                                                          domain=domainobject)
-            prj.project_object = project
-
-        # get the member role
-        role = self.admin.keystone.roles.find(name="admin")
-        user = self.admin.keystone.users.find(name=username)
-        self.admin.keystone.roles.grant(user=user, role=role, project=project)
-
+        
+        self._projects[key] = prj
         return prj
 
     def cleanup(self):
@@ -183,9 +302,11 @@ class OpenstackTester(object):
         while count < 10 and not ready:
             ready = True
             for prj in self._projects.values():
-                done = self.clean_project(prj) if prj.project_object is not None else True
+                done = (
+                    self.clean_project(prj) if prj.project_object is not None else True
+                )
                 if prj.project_object is not None and done:
-                    prj.project_object.delete()
+                    prj._super_admin.connection.delete_project(prj.project_object)
                     prj.project_object = None
 
                 if not done:
@@ -197,41 +318,43 @@ class OpenstackTester(object):
         """
             Clean all the resource in the given project
         """
-        try:
-            project_id = project.project_object.id
-            for server in project.nova.servers.list():
-                server.delete()
+        conn = project._super_admin.connection
+        
+        project_id = project.project_object.id
+        # for server in conn.compute.servers(project_id=project_id, all_tenants=True):
+        #     print("Found server:",server)
+        #     conn.compute.delete_server(server)
 
-            for kp in project.nova.keypairs.list():
-                kp.delete()
+        # for kp in project.nova.keypairs.list():
+        #     kp.delete()
 
-            for hp in project.neutron.list_ports()["ports"]:
-                if hp["tenant_id"] == project_id:
-                    project.neutron.delete_port(hp["id"])
+        # for hp in project.neutron.list_ports()["ports"]:
+        #     if hp["tenant_id"] == project_id:
+        #         project.neutron.delete_port(hp["id"])
 
-            subnets = project.neutron.list_subnets()["subnets"]
-            for subnet in subnets:
-                if subnet["tenant_id"] == project_id:
-                    project.neutron.delete_subnet(subnet["id"])
+        # subnets = project.neutron.list_subnets()["subnets"]
+        # for subnet in subnets:
+        #     if subnet["tenant_id"] == project_id:
+        #         project.neutron.delete_subnet(subnet["id"])
 
-            networks = project.neutron.list_networks()["networks"]
-            for network in networks:
-                if network["tenant_id"] == project_id:
-                    project.neutron.delete_network(network["id"])
+        networks = conn.network.networks(project_id=project_id)
+        for network in networks:
+            conn.network.delete_network(network)
 
-            return True
-        except Exception:
-            return False
+        return True
+        
+
 
 @pytest.fixture(scope="function")
-def openstack():
+def openstack(request):
     ost = OpenstackTester(
-            auth_url = os.environ["OS_AUTH_URL"],
-            username = os.environ["OS_USERNAME"],
-            password = os.environ["OS_PASSWORD"],
-            tenant = os.environ["OS_PROJECT_NAME"],
-            domain = "default")
+        auth_url=os.environ["OS_AUTH_URL"],
+        username=os.environ["OS_USERNAME"],
+        password=os.environ["OS_PASSWORD"],
+        tenant=os.environ["OS_PROJECT_NAME"],
+        domain="default",
+    )
 
     yield ost
-
-    ost.cleanup()
+    if not request.config.getoption("--noclean"):
+        ost.cleanup()

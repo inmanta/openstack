@@ -16,55 +16,8 @@
     Contact: code@inmanta.com
 """
 import inmanta
-
-
-def test_net(project, neutron):
-    try:
-        project.compile("""
-    import unittest
-    import openstack
-
-    tenant = std::get_env("OS_PROJECT_NAME")
-    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
-                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
-    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-    n = openstack::Network(provider=p, name="test_net", project=project, external=true)
-            """)
-
-        n1 = project.deploy_resource("openstack::Network", name="test_net")
-
-        networks = neutron.list_networks(name=n1.name)["networks"]
-        assert len(networks) == 1
-
-        assert networks[0]["router:external"]
-
-        ctx = project.deploy(n1)
-        assert ctx.status == inmanta.const.ResourceState.deployed
-
-        project.compile("""
-    import unittest
-    import openstack
-
-    tenant = std::get_env("OS_PROJECT_NAME")
-    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
-                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
-    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-    n = openstack::Network(provider=p, name="test_net", project=project, purged=true)
-            """)
-
-        n1 = project.get_resource("openstack::Network", name="test_net")
-        ctx = project.deploy(n1)
-        assert ctx.status == inmanta.const.ResourceState.deployed
-
-        networks = neutron.list_networks(name=n1.name)["networks"]
-        assert len(networks) == 0
-
-    finally:
-        # cleanup
-        networks = neutron.list_networks(name=n1.name)["networks"]
-        if len(networks) > 0:
-            for network in networks:
-                neutron.delete_network(network["id"])
+from common import *
+from inmanta import const
 
 
 def test_subnet(project, neutron):
@@ -123,6 +76,45 @@ def test_subnet(project, neutron):
         if len(networks) > 0:
             for network in networks:
                 neutron.delete_network(network["id"])
+
+def test_subnet_dryrun(project, openstack):
+    name = "inmanta_unit_test"
+    osproject = openstack.get_project("test_subnet_dryrun")
+
+    def make_model(netname):
+        project.compile("""
+    import unittest
+    import openstack
+
+    tenant = "%(project)s"
+    p = openstack::Provider(name="test", connection_url="%(auth_url)s", username="%(username)s",
+                        password="%(password)s", tenant=tenant, project_domain_name="%(domain)s", user_domain_name="%(domain)s")
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="%(netname)s", project=project)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
+                            network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
+            """ % {"name": name,
+                    "netname": netname,
+                    "project": osproject._tenant, 
+                    "auth_url": osproject._auth_url,
+                    "username": osproject._username,
+                    "password": osproject._password,
+                    "domain":osproject._domain,})
+    make_model(name)
+
+    assert_dr(dryrun(project, "openstack::Subnet"), 1)
+
+    project.deploy_resource("openstack::Network")
+    project.deploy_resource("openstack::Subnet")
+
+    assert_dr(dryrun(project, "openstack::Subnet"), 0)
+
+    make_model(name+"other")
+
+    changes = assert_dr(dryrun(project, "openstack::Subnet"), 1)
+    assert "network" in changes
+
+    project.deploy_resource("openstack::Subnet", status=const.ResourceState.skipped)
 
 
 def test_router(project, neutron):
@@ -355,47 +347,38 @@ openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_mi
     assert len(sgs["security_groups"]) == 0
 
 
-def test_security_group_vm(project, neutron, nova):
+def test_host_port_dryrun(project, openstack):
     name = "inmanta-unit-test"
+    tenant1 = openstack.get_project("test_host_port_dryrun")
     key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
            "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
            "bart@wolf.inmanta.com")
 
-    project.compile("""
-import unittest
-import openstack
-import ssh
+    def make_model(netname, cidr="10.255.255.0/24"):
+        project.compile("""
+        import unittest
+        import openstack
+        import ssh
 
-tenant = std::get_env("OS_PROJECT_NAME")
-p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
-                        password=std::get_env("OS_PASSWORD"), tenant=tenant)
-project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+        tenant = "%(tenant)s"
+        p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                                password=std::get_env("OS_PASSWORD"), tenant=tenant)
+        project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
 
-sg_mgmt = openstack::SecurityGroup(provider=p, project=project, name="%(name)s", description="Test Mgmt SG")
-openstack::IPrule(group=sg_mgmt, direction="egress", ip_protocol="all", remote_prefix="0.0.0.0/0")
-openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="icmp", remote_prefix="0.0.0.0/0")
-openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="tcp", port=22, remote_prefix="0.0.0.0/0")
-openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="all", remote_prefix="0.0.0.0/0")
+        os = std::OS(name="cirros", version=0.4, family=std::linux)
 
+        key = ssh::Key(name="%(name)s", public_key="%(key)s")
+        net = openstack::Network(provider=p, project=project, name="%(name)s")
+        subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="%(netname)s",
+                                network_address="%(cidr)s")
+        vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os,
+                            image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
+    
+                """ % {"name": name, "key": key, "tenant": tenant1._tenant, "netname":netname, "cidr":cidr})
 
-os = std::OS(name="cirros", version=0.4, family=std::linux)
+    make_model(name)
 
-key = ssh::Key(name="%(name)s", public_key="%(key)s")
-net = openstack::Network(provider=p, project=project, name="%(name)s")
-subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="%(name)s",
-                           network_address="10.255.255.0/24")
-vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os,
-                     image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
-vm.vm.security_groups=[sg_mgmt]
-
-vm2 = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s-2", os=os,
-                     image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
-vm2.vm.security_groups=[sg_mgmt]
-        """ % {"name": name, "key": key})
-
-    sg1 = project.get_resource("openstack::SecurityGroup", name=name)
-    ctx = project.deploy(sg1)
-    assert ctx.status == inmanta.const.ResourceState.deployed
+    dryrun(project, "openstack::HostPort", const.ResourceState.skipped)
 
     n1 = project.get_resource("openstack::Network", name=name)
     ctx = project.deploy(n1)
@@ -409,17 +392,107 @@ vm2.vm.security_groups=[sg_mgmt]
     ctx = project.deploy(h1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
+    dr = assert_dr(dryrun(project, "openstack::HostPort"),1)
+    assert "name" in dr
+
     hp1 = project.get_resource("openstack::HostPort", name=name + "_eth0")
+    print(hp1.serialize())
     ctx = project.deploy(hp1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
-    h1 = project.get_resource("openstack::VirtualMachine", name=name + "-2")
-    ctx = project.deploy(h1)
+    assert_dr(dryrun(project, "openstack::HostPort"),0)
+
+   
+    make_model(name+"2", cidr="10.255.10.0/24")
+
+    dryrun(project, "openstack::HostPort")
+
+    changes =  assert_dr(dryrun(project, "openstack::HostPort"),1)
+    print(changes)
+    assert "subnet" in changes
+
+    s1 = project.get_resource("openstack::Subnet")
+    ctx = project.deploy(s1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
-    hp1 = project.get_resource("openstack::HostPort", name=name + "-2_eth0")
-    ctx = project.deploy(hp1)
-    assert ctx.status == inmanta.const.ResourceState.deployed
+    changes =  assert_dr(dryrun(project, "openstack::HostPort"),1)
+    print(changes)
+    assert "subnet" in changes
+
+
+def test_security_group_vm(project, neutron, nova, openstack):
+    name = "inmanta-unit-test"
+    key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
+           "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
+           "bart@wolf.inmanta.com")
+
+    # make same SG in another tenant
+    confuse_sg = neutron.create_security_group({"security_group": {"name": name,
+                                                                     "description": "SG to confuse the handler"}})
+    try:
+        tenant1 = openstack.get_project("tenant1_sg")
+
+        project.compile("""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "%(tenant)s"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+
+    sg_mgmt = openstack::SecurityGroup(provider=p, project=project, name="%(name)s", description="Test Mgmt SG")
+    openstack::IPrule(group=sg_mgmt, direction="egress", ip_protocol="all", remote_prefix="0.0.0.0/0")
+    openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="icmp", remote_prefix="0.0.0.0/0")
+    openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="tcp", port=22, remote_prefix="0.0.0.0/0")
+    openstack::IPrule(group=sg_mgmt, direction="ingress", ip_protocol="all", remote_prefix="0.0.0.0/0")
+
+
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
+
+    key = ssh::Key(name="%(name)s", public_key="%(key)s")
+    net = openstack::Network(provider=p, project=project, name="%(name)s")
+    subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="%(name)s",
+                            network_address="10.255.255.0/24")
+    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os,
+                        image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
+    vm.vm.security_groups=[sg_mgmt]
+
+    vm2 = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s-2", os=os,
+                        image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
+    vm2.vm.security_groups=[sg_mgmt]
+            """ % {"name": name, "key": key, "tenant": tenant1._tenant})
+
+        sg1 = project.get_resource("openstack::SecurityGroup", name=name)
+        ctx = project.deploy(sg1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+
+        n1 = project.get_resource("openstack::Network", name=name)
+        ctx = project.deploy(n1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+
+        s1 = project.get_resource("openstack::Subnet", name=name)
+        ctx = project.deploy(s1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+
+        h1 = project.get_resource("openstack::VirtualMachine", name=name)
+        ctx = project.deploy(h1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+
+        hp1 = project.get_resource("openstack::HostPort", name=name + "_eth0")
+        ctx = project.deploy(hp1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+
+        h1 = project.get_resource("openstack::VirtualMachine", name=name + "-2")
+        ctx = project.deploy(h1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+
+        hp1 = project.get_resource("openstack::HostPort", name=name + "-2_eth0")
+        ctx = project.deploy(hp1)
+        assert ctx.status == inmanta.const.ResourceState.deployed
+    finally:
+        neutron.delete_security_group(confuse_sg["security_group"]["id"])
 
 
 def  test_shared_network(project, openstack):
@@ -448,7 +521,11 @@ def  test_shared_network(project, openstack):
             """ % {"name": net_name, "project": tenant1._tenant})
 
     project.deploy_resource("openstack::Network", name=net_name)
+    tenant1.assert_network(net_name)
+
     project.deploy_resource("openstack::Subnet", name=net_name)
+    tenant1.assert_subnet(net_name)
+
 
     # create a hostport on the shared network in tenant2
     project.compile("""
@@ -459,9 +536,11 @@ def  test_shared_network(project, openstack):
     tenant = "%(project)s"
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project1 = openstack::Project(provider=p, name="%(otherproject)s", description="", enabled=true, managed=false)
     project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-    n1 = openstack::Network(provider=p, name="%(net_name)s", project=project, managed=false)
-    s1 = openstack::Subnet(provider=p, project=project, network=n1, dhcp=true, name="%(net_name)s",
+
+    n1 = openstack::Network(provider=p, name="%(net_name)s", project=project1, managed=false)
+    s1 = openstack::Subnet(provider=p, project=project1, network=n1, dhcp=true, name="%(net_name)s",
                                network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=false)
 
     n2 = openstack::Network(provider=p, name="%(net_name)s2", project=project, managed=true)
@@ -475,12 +554,19 @@ def  test_shared_network(project, openstack):
                          subnet=s2)
     port = openstack::HostPort(provider=p, vm=vm.vm, subnet=s1, name="%(server_name)s_eth1", address="10.255.255.123",
                                project=project, port_index=2, purged=false, dhcp=false)
-            """ % {"net_name": net_name, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
+            """ % {"net_name": net_name, "otherproject":tenant1._tenant, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
 
     project.deploy_resource("openstack::Network", name=net_name + "2")
+    #print(project.get_resource("openstack::VirtualMachine").serialize())
+    tenant2.assert_network(net_name + "2")
+
     project.deploy_resource("openstack::Subnet", name=net_name + "2")
+    tenant2.assert_subnet(net_name + "2")
+
     project.deploy_resource("openstack::VirtualMachine")
     project.deploy_resource("openstack::HostPort")
+
+    #todo assert port
 
     project.compile("""
     import unittest
@@ -490,9 +576,11 @@ def  test_shared_network(project, openstack):
     tenant = "%(project)s"
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project1 = openstack::Project(provider=p, name="%(otherproject)s", description="", enabled=true, managed=false)
     project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-    n1 = openstack::Network(provider=p, name="%(net_name)s", project=project, managed=false)
-    s1 = openstack::Subnet(provider=p, project=project, network=n1, dhcp=true, name="%(net_name)s",
+
+    n1 = openstack::Network(provider=p, name="%(net_name)s", project=project1, managed=false)
+    s1 = openstack::Subnet(provider=p, project=project1, network=n1, dhcp=true, name="%(net_name)s",
                                network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"], managed=false)
 
     n2 = openstack::Network(provider=p, name="%(net_name)s2", project=project, managed=true)
@@ -514,11 +602,13 @@ def  test_shared_network(project, openstack):
 
     openstack::HostPort(provider=p, vm=vm.vm, subnet=s3, name="%(server_name)s_eth2", address="10.255.253.12",
                         project=project, port_index=3, purged=false, dhcp=false)
-            """ % {"net_name": net_name, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
+            """ % {"net_name": net_name, "otherproject":tenant1._tenant,"project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
 
     project.deploy_resource("openstack::Network", name=net_name + "3")
     project.deploy_resource("openstack::Subnet", name=net_name + "3")
     project.deploy_resource("openstack::HostPort", name=server_name+"_eth2")
+
+    #todo assert port
 
 
 def test_allowed_addr_port(project, openstack):
