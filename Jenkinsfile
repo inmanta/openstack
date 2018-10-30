@@ -12,9 +12,8 @@ pipeline {
         stage('Test') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'openstack-super-user', passwordVariable: 'OS_PASSWORD', usernameVariable: 'OS_USERNAME')]) {
-                    sh 'mkdir -p $INMANTA_TEST_ENV'
-                    echo 'Testing..'
-                    sh 'tox'
+                    sh 'rm -rf $INMANTA_TEST_ENV; python3 -m virtualenv $INMANTA_TEST_ENV; $INMANTA_TEST_ENV/bin/python3 -m pip install -U  inmanta pytest-inmanta; $INMANTA_TEST_ENV/bin/python3 -m pip install -r requirements.txt'
+                    sh '$INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit-{envname}.xml -vvv tests/test_dummy.py'
                 }
             }
         }
