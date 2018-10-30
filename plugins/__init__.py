@@ -896,7 +896,7 @@ class OpenStackHandlerV2(CRUDHandler):
     @cache(timeout=CRED_TIMEOUT)
     def get_connection(self, user:UserReference):
         return connection.Connection(
-                session=self.get_session(user), identity_interface="public"
+                session=self.get_session(user), identity_interface="public", identity_api_version="3.0"
             )
 
     @cache(timeout=KEYSTONE_TIMEOUT)

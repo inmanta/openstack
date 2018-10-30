@@ -4,7 +4,8 @@ import conftest
 def test_openstack_sdk_connect(session):
     conn = connection.Connection(
         session=session,
-        identity_interface='public')
+        identity_interface='public',
+        identity_api_version="3.0")
     projects = conn.identity.projects()
     assert len([x for x in projects]) != 0
 
@@ -12,7 +13,8 @@ def test_openstack_sdk_connect(session):
 def test_get_own_project_and_domain(session):
     conn = connection.Connection(
         session=session,
-        identity_interface='public')
+        identity_interface='public',
+        identity_api_version="3.0")
     
     myproject = conn.current_project.id
 
@@ -28,7 +30,8 @@ def test_get_own_project_and_domain(session):
 def test_get_own_project_and_domain_2(session):
     conn = connection.Connection(
         session=session,
-        identity_interface='public')
+        identity_interface='public',
+        identity_api_version="3.0")
     
     myproject = conn.current_project.id
 
@@ -106,32 +109,21 @@ def test_network_isolation(openstack):
     d1p1user2 = dump_networks("d1p1 user Sec",  d1p1._user)
     assert d1p1user2 == public_networks+1
 
-    d1p1user2plus = dump_networks("d1p1 user Sec Two",  d1p1._user, d1p1._user.connection_for_project(d2p1.project_id))
-    assert d1p1user2plus == public_networks+1
+    # for openstacksdk>=18.0 
+    # d1p1user2plus = dump_networks("d1p1 user Sec Two",  d1p1._user, d1p1._user.connection_for_project(d2p1.project_id))
+    # assert d1p1user2plus == public_networks+1
 
 
 import threading
 def test_threading_problem(openstack):
     project = openstack.get_project(SHARED_FIXTURE)
-    print(threading.active_count())
+    assert threading.active_count() == 1
     project._admin.connection
     project._user.connection
-    print(threading.active_count())
+    assert threading.active_count() == 1
     project._user.connection.identity
     project._user.connection.network.networks()
-    print(threading.active_count())
+    assert threading.active_count() == 1
     project._user.connection.identity
     project._user.connection.network.networks()
-    print(threading.active_count())
-    project._user.connection.task_manager.stop()
-    project._admin.connection.task_manager.stop()
-    print(threading.active_count())
-    project._user.connection.task_manager.join()
-    project._admin.connection.task_manager.join()
-    print(threading.active_count())
-    project._user.connection.identity.task_manager.stop()
-    project._user.connection.identity.task_manager.join()
-    print(threading.active_count())
-    project._user.connection.network.task_manager.stop()
-    project._user.connection.network.task_manager.join()
-    print(threading.enumerate())
+    assert threading.active_count() == 1

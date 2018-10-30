@@ -3,4 +3,5 @@ python-keystoneclient
 python-novaclient
 python-neutronclient
 python-glanceclient<2.7
+# 0.18 has a serious problem with thread pools spawning everywhere see test_threading_problem
 openstacksdk<0.18

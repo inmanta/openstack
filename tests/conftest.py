@@ -110,7 +110,7 @@ class User(object):
     def connection(self):
         if self._connection is None:
             self._connection = connection.Connection(
-                session=self.session, identity_interface="public"
+                session=self.session, identity_interface="public", identity_api_version="3.0"
             )
         return self._connection
 
