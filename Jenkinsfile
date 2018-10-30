@@ -8,7 +8,7 @@ pipeline {
     environment {
         OS_AUTH_URL=credentials('openstack_url')
         OS_PROJECT_NAME='admin'
-        INMANTA_MODULE_REPO='https://github.com/inmanta'
+        INMANTA_MODULE_REPO='https://github.com/inmanta/'
         INMANTA_TEST_ENV="${env.WORKSPACE}/env"
     } 
 
