@@ -306,7 +306,7 @@ class OpenstackTester(object):
                     self.clean_project(prj) if prj.project_object is not None else True
                 )
                 if prj.project_object is not None and done:
-                    prj._super_admin.connection.delete_project(prj.project_object)
+                    prj._super_admin.connection.delete_project(prj.project_object.id)
                     prj.project_object = None
 
                 if not done:
