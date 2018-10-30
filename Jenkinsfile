@@ -9,6 +9,11 @@ pipeline {
     } 
 
     stages {
+        stage('PreTest'){
+            steps{
+                sh 'curl $OS_AUTH_URL -v -m 2'
+            }
+        }
         stage('Test') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'openstack-super-user', passwordVariable: 'OS_PASSWORD', usernameVariable: 'OS_USERNAME')]) {
