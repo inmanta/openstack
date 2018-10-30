@@ -1,14 +1,18 @@
 pipeline {
     agent any
 
-    environment {
-        OS_AUTH_URL='http://192.168.2.30:5000/v3'
-        OS_USERNAME=
-        OS_PASSWORD=
-        OS_PROJECT_NAME='admin'
-        INMANTA_MODULE_REPO='https://github.com/inmanta'
-        INMANTA_TEST_ENV="${env.WORKSPACE}/env"
+    withCredentials([usernamePassword(credentialsId: 'openstack-super-user', passwordVariable: 'os_password', usernameVariable: 'os_username')]) {
+        environment {
+            OS_AUTH_URL=credentials('openstack_url')
+            OS_USERNAME=os_username
+            OS_PASSWORD=os_password
+            OS_PROJECT_NAME='admin'
+            INMANTA_MODULE_REPO='https://github.com/inmanta'
+            INMANTA_TEST_ENV="${env.WORKSPACE}/env"
+        } 
     }
+
+   
 
     stages {
         stage('Test') {
