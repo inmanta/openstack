@@ -4,8 +4,8 @@ from conftest import Project, User
 
 
 def test_get_project_id(project, openstack):
-    d1: Project = openstack.get_shared_project()
-    d2: Project = openstack.get_shared_project_d2()
+    d1 = openstack.get_shared_project()
+    d2 = openstack.get_shared_project_d2()
 
     p1 = d1.project_object.id
     p2 = d2.project_object.id
