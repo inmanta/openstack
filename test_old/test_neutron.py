@@ -20,63 +20,6 @@ from common import *
 from inmanta import const
 
 
-def test_subnet(project, neutron):
-    name = "inmanta_unit_test"
-    try:
-        project.compile("""
-    import unittest
-    import openstack
-
-    tenant = std::get_env("OS_PROJECT_NAME")
-    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
-                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
-    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-    n = openstack::Network(provider=p, name="%(name)s", project=project)
-    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
-                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
-            """ % {"name": name})
-
-        net = project.deploy_resource("openstack::Network")
-        subnet = project.deploy_resource("openstack::Subnet")
-
-        subnets = neutron.list_subnets(name=subnet.name)["subnets"]
-        assert len(subnets) == 1
-        assert len(neutron.list_networks(name=net.name)["networks"]) == 1
-
-        os_subnet = subnets[0]
-        assert len(os_subnet["dns_nameservers"]) == 2
-
-        project.compile("""
-    import unittest
-    import openstack
-
-    tenant = std::get_env("OS_PROJECT_NAME")
-    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
-                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
-    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-    n = openstack::Network(provider=p, name="%(name)s", project=project, purged=true)
-    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
-                               network_address="10.255.255.0/24", purged=true)
-            """ % {"name": name})
-
-        net = project.deploy_resource("openstack::Network")
-        subnet = project.deploy_resource("openstack::Subnet")
-
-        assert len(neutron.list_subnets(name=subnet.name)["subnets"]) == 0
-        assert len(neutron.list_networks(name=net.name)["networks"]) == 0
-
-    finally:
-        # cleanup
-        networks = neutron.list_subnets(name=name)["subnets"]
-        if len(networks) > 0:
-            for network in networks:
-                neutron.delete_subnet(network["id"])
-
-        networks = neutron.list_networks(name=name)["networks"]
-        if len(networks) > 0:
-            for network in networks:
-                neutron.delete_network(network["id"])
-
 def test_subnet_dryrun(project, openstack):
     name = "inmanta_unit_test"
     osproject = openstack.get_project("test_subnet_dryrun")

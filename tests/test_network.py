@@ -1,5 +1,6 @@
 import pytest
 from common import reload, facts, dryrun_resource, ib
+from inmanta import const
 
 def test_net(project, openstack):
     osproject = openstack.get_shared_project()
@@ -76,6 +77,15 @@ def test_net(project, openstack):
     #dryrun
     dr = dryrun_resource(project, res)
     assert len(dr) == 0
+
+
+    #double network
+    double = osproject.create_network("test_net", True)
+    
+    dryrun_resource(project, res, status=const.ResourceState.failed)
+    
+    project.deploy_resource("openstack::Network", name="test_net", status=const.ResourceState.failed)
+    osproject._admin.connection.network.delete_network(double.id)
 
     #delete
     res = make(external=False, purged=True)

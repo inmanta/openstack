@@ -16,37 +16,31 @@
     Contact: code@inmanta.com
 """
 
-import os
-import traceback
+import datetime
 import logging
 import time
-import datetime
-import math
+import traceback
+import os
 import typing
 
-
-from inmanta.execute import proxy, util
-from inmanta.resources import resource, PurgeableResource, ManagedResource
-from inmanta import resources, ast
+import math
+import novaclient.exceptions
+from glanceclient import client as glance_client
+from inmanta import ast, resources
 from inmanta.agent import handler
-from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler, HandlerContext
+from inmanta.agent.handler import CRUDHandler, HandlerContext, ResourcePurged, \
+    SkipResource, cache, provider
+from inmanta.execute import proxy, util
 from inmanta.export import dependency_manager
 from inmanta.plugins import plugin
-
+from inmanta.resources import ManagedResource, PurgeableResource, resource
+from keystoneauth1 import session
+from keystoneauth1.identity import v3
+from keystoneclient.v3 import client as keystone_client
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
-
 from novaclient import client as nova_client
-import novaclient.exceptions
-
-from keystoneauth1.identity import v3
-from keystoneauth1 import session
-from keystoneclient.v3 import client as keystone_client
-
-from glanceclient import client as glance_client
-
 from openstack import connection
-
 
 
 try:
@@ -63,6 +57,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 IMAGES = {}
+
 
 @plugin
 def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=None) -> "string":
@@ -94,16 +89,20 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
            ("os_distro" in image and "os_version" in image) and \
            (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
            (name is None or name in image["name"]):
-            t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+            t = datetime.datetime.strptime(
+                image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
             if t > selected[0]:
                 selected = (t, image)
 
     if len(selected) < 2 or selected[1]["id"] is None:
-        raise Exception("No image found for os %s and version %s" % (os.name, os.version))
+        raise Exception("No image found for os %s and version %s" %
+                        (os.name, os.version))
 
     return selected[1]["id"]
 
+
 FLAVORS = {}
+
 
 @plugin
 def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number", pinned: "bool"=False) -> "string":
@@ -135,7 +134,7 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
         d_ram = (flavor.ram / 1024) - ram
         distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
         if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
-                selected = (distance, flavor)
+            selected = (distance, flavor)
 
     return selected[1].name
 
@@ -146,7 +145,7 @@ class OpenStackReference(object):
         return vars(self)
 
     def __repr__(self):
-        return "%s(%s)"%(self.__class__.__name__, ",".join(sorted(["%s='%s'"%(k,v) for k,v in self.to_dict().items()])))
+        return "%s(%s)" % (self.__class__.__name__, ",".join(sorted(["%s='%s'" % (k, v) for k, v in self.to_dict().items()])))
 
     @classmethod
     def from_dict(cls, input):
@@ -190,7 +189,8 @@ class UserReference(OpenStackReference):
     def diff(self, other):
         """ always part of key, can never be read """
         return None
-    
+
+
 class ProjectReference(OpenStackReference):
 
     def __init__(self, domain_name=None, project_name=None):
@@ -213,16 +213,76 @@ class ProjectReference(OpenStackReference):
         return None
 
 
+class ProjectScoped(ProjectReference):
+
+    def __init__(self, name=None, domain_name=None, project_name=None):
+        self.domain_name = domain_name
+        self.project_name = project_name
+        self.name = name
+
+    @classmethod
+    def from_model(cls, entity):
+        out = cls(
+            name=entity.name,
+            domain_name=entity.project.domain_name,
+            project_name=entity.project.name
+        )
+        return out
+
+    @classmethod
+    def from_dict(cls, input):
+        return cls(**input)
+
+    def __eq__(self, other):
+        return self.domain_name == other.domain_name \
+            and self.project_name == other.project_name \
+            and self.name == other.name
+
+    def __str__(self):
+        return "%s/%s/%s" % (self.domain_name, self.project_name, self.name)
+
+    def diff(self, desired_value):
+        if self == desired_value:
+            return None
+        else:
+            return {
+                "current": str(self),
+                "desired": str(desired_value)
+            }
+
+
+class NetworkReference(ProjectScoped):
+
+    pass
+
+
 class OpenStackResourceV2(PurgeableResource, ManagedResource):
 
     fields = ("user", "project")
-    sub_fields = {"user":UserReference.from_dict, "project":ProjectReference.from_dict}
+    sub_fields = {"user": UserReference.from_dict,
+                  "project": ProjectReference.from_dict}
 
+    @classmethod
+    def _get_sub_fields(cls):
+        fields = {}
+
+        bases = cls.__bases__
+        for base in bases:
+            if issubclass(base, OpenStackResourceV2):
+                fields.update(base._get_sub_fields())
+        
+        if "sub_fields" in cls.__dict__:
+            if not isinstance(cls.__dict__["sub_fields"], dict):
+                raise Exception(
+                    "sub_fields attribute of %s should be a dict" % base)
+            fields.update(cls.__dict__["sub_fields"])
+
+        return fields
 
     def decode(self):
         if not hasattr(self, "_decoded"):
             self._decoded = True
-            for field, decoder in self.sub_fields.items():
+            for field, decoder in self._get_sub_fields().items():
                 encoded = getattr(self, field)
                 if not isinstance(encoded, OpenStackReference):
                     decoded = decoder(encoded)
@@ -238,10 +298,11 @@ class OpenStackResourceV2(PurgeableResource, ManagedResource):
 
     def diff(self, desired):
         return None
-    
+
 
 class OpenstackResource(PurgeableResource, ManagedResource):
-    fields = ("project", "admin_user", "admin_password", "admin_tenant", "auth_url")
+    fields = ("project", "admin_user", "admin_password",
+              "admin_tenant", "auth_url")
 
     @staticmethod
     def get_project(exporter, resource):
@@ -269,7 +330,8 @@ class VirtualMachine(OpenstackResource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
-    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups", "config_drive")
+    fields = ("name", "flavor", "image", "key_name", "user_data",
+              "key_value", "ports", "security_groups", "config_drive")
 
     @staticmethod
     def get_key_name(exporter, vm):
@@ -295,7 +357,8 @@ class VirtualMachine(OpenstackResource):
     def get_ports(_, vm):
         ports = []
         for p in vm.ports:
-            port = {"name": p.name, "address": None, "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
+            port = {"name": p.name, "address": None,
+                    "network": p.subnet.name, "dhcp": p.dhcp, "index": p.port_index}
             try:
                 port["address"] = p.address
             except proxy.UnknownException:
@@ -314,19 +377,22 @@ class Network(OpenStackResourceV2):
     """
         This class represents a network in neutron
     """
-    fields = ("name", "external", "physical_network", "network_type", "segmentation_id", "shared")
+    fields = ("name", "external", "physical_network",
+              "network_type", "segmentation_id", "shared")
 
 
 @resource("openstack::Subnet", agent="provider.name", id_attribute="name")
-class Subnet(OpenstackResource):
+class Subnet(OpenStackResourceV2):
     """
         This class represent a subnet in neutron
     """
-    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network", "dns_servers")
+    fields = ("name", "network_address", "dhcp", "allocation_start",
+              "allocation_end", "network", "dns_servers")
+    sub_fields = {"network": NetworkReference.from_dict}
 
     @staticmethod
-    def get_network(_, subnet):
-        return subnet.network.name
+    def get_network(_, resource):
+        return NetworkReference.from_model(resource.network)
 
 
 @resource("openstack::Router", agent="provider.name", id_attribute="name")
@@ -401,7 +467,8 @@ class HostPort(Port):
     """
         A port in a router
     """
-    fields = ("host", "portsecurity", "dhcp", "port_index", "retries", "wait", "allowed_address_pairs")
+    fields = ("host", "portsecurity", "dhcp", "port_index",
+              "retries", "wait", "allowed_address_pairs")
 
     @staticmethod
     def get_host(_, port):
@@ -463,7 +530,8 @@ class SecurityGroup(OpenstackResource):
                 dedup.add(key)
                 rules.append(json_rule)
             else:
-                LOGGER.warning("A duplicate rule exists in security group %s", group.name)
+                LOGGER.warning(
+                    "A duplicate rule exists in security group %s", group.name)
 
         return rules
 
@@ -491,7 +559,8 @@ class FloatingIP(OpenstackResource):
 
 
 class KeystoneResource(PurgeableResource, ManagedResource):
-    fields = ("admin_token", "url", "admin_user", "admin_password", "admin_tenant", "auth_url")
+    fields = ("admin_token", "url", "admin_user",
+              "admin_password", "admin_tenant", "auth_url")
 
     @staticmethod
     def get_admin_token(_, resource):
@@ -567,7 +636,8 @@ class EndPoint(KeystoneResource):
     """
         An endpoint for a service
     """
-    fields = ("region", "internal_url", "public_url", "admin_url", "service_id")
+    fields = ("region", "internal_url", "public_url",
+              "admin_url", "service_id")
 
 
 @dependency_manager
@@ -675,8 +745,10 @@ CRED_TIMEOUT = 600
 KEYSTONE_TIMEOUT = 10
 RESOURCE_TIMEOUT = 10
 
+
 class OpenStackException(Exception):
     pass
+
 
 class OpenStackHandler(CRUDHandler):
 
@@ -701,10 +773,12 @@ class OpenStackHandler(CRUDHandler):
 
     def pre(self, ctx, resource):
         project = resource.admin_tenant
-        self._nova = self.get_nova_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
+        self._nova = self.get_nova_client(
+            resource.auth_url, project, resource.admin_user, resource.admin_password)
         self._neutron = self.get_neutron_client(resource.auth_url, project, resource.admin_user,
                                                 resource.admin_password)
-        self._keystone = self.get_keystone_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
+        self._keystone = self.get_keystone_client(
+            resource.auth_url, project, resource.admin_user, resource.admin_password)
 
     def post(self, ctx, resource):
         self._nova = None
@@ -717,7 +791,8 @@ class OpenStackHandler(CRUDHandler):
         """
         # Fallback for non admin users
         if resource.admin_tenant == name:
-            session = self.get_session(resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
+            session = self.get_session(
+                resource.auth_url, resource.project, resource.admin_user, resource.admin_password)
             return session.get_project_id()
 
         try:
@@ -746,7 +821,8 @@ class OpenStackHandler(CRUDHandler):
             return None
 
         elif len(networks["networks"]) > 1:
-            raise Exception("Found more than one network with name %s/id %s for project %s" % (name, network_id, project_id))
+            raise Exception("Found more than one network with name %s/id %s for project %s" %
+                            (name, network_id, project_id))
 
         else:
             return networks["networks"][0]
@@ -756,10 +832,12 @@ class OpenStackHandler(CRUDHandler):
             Retrieve the subnet id based on the name of the network
         """
         if name is not None:
-            subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
+            subnets = self._neutron.list_subnets(
+                tenant_id=project_id, name=name)
         elif subnet_id is not None:
             if project_id is not None:
-                subnets = self._neutron.list_subnets(tenant_id=project_id, id=subnet_id)
+                subnets = self._neutron.list_subnets(
+                    tenant_id=project_id, id=subnet_id)
             else:
                 subnets = self._neutron.list_subnets(id=subnet_id)
         else:
@@ -769,7 +847,8 @@ class OpenStackHandler(CRUDHandler):
             return None
 
         elif len(subnets["subnets"]) > 1:
-            raise Exception("Found more than one subnet with name %s for project %s" % (name, project_id))
+            raise Exception(
+                "Found more than one subnet with name %s for project %s" % (name, project_id))
 
         else:
             return subnets["subnets"][0]
@@ -796,7 +875,8 @@ class OpenStackHandler(CRUDHandler):
             return None
 
         elif len(routers["routers"]) > 1:
-            raise Exception("Found more than one router with name %s for project %s" % (name, project_id))
+            raise Exception(
+                "Found more than one router with name %s for project %s" % (name, project_id))
 
         else:
             return routers["routers"][0]
@@ -814,7 +894,8 @@ class OpenStackHandler(CRUDHandler):
             return None
 
         elif len(vms) > 1:
-            raise Exception("Found more than one VM with name %s for project %s" % (name, project_id))
+            raise Exception(
+                "Found more than one VM with name %s for project %s" % (name, project_id))
 
         else:
             return vms[0]
@@ -846,7 +927,8 @@ class OpenStackHandler(CRUDHandler):
         if len(sgs["security_groups"]) == 0:
             return None
         elif len(sgs["security_groups"]) > 1:
-            ctx.warning("Multiple security groups with name %(name)s exist.", name=name, groups=sgs["security_groups"])
+            ctx.warning("Multiple security groups with name %(name)s exist.",
+                        name=name, groups=sgs["security_groups"])
 
         return sgs["security_groups"][0]
 
@@ -877,12 +959,13 @@ class OpenStackHandlerV2(CRUDHandler):
                 if diff is not None:
                     changes[field] = diff
             elif current_value != desired_value and desired_value is not None:
-                changes[field] = {"current": current_value, "desired": desired_value}
+                changes[field] = {"current": current_value,
+                                  "desired": desired_value}
 
         return changes
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_session(self, user:UserReference):
+    def get_session(self, user: UserReference):
         auth = v3.Password(
             auth_url=user.connection_url,
             username=user.username,
@@ -894,13 +977,13 @@ class OpenStackHandlerV2(CRUDHandler):
         return session.Session(auth=auth)
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_connection(self, user:UserReference):
+    def get_connection(self, user: UserReference):
         return connection.Connection(
-                session=self.get_session(user), identity_interface="public", identity_api_version="3.0"
-            )
+            session=self.get_session(user), identity_interface="public", identity_api_version="3.0"
+        )
 
     @cache(timeout=KEYSTONE_TIMEOUT)
-    def get_project_id(self, user:UserReference, project:ProjectReference):
+    def get_project_id(self, user: UserReference, project: ProjectReference):
         """
             Retrieve the id of a project based on the given name
         """
@@ -910,15 +993,83 @@ class OpenStackHandlerV2(CRUDHandler):
         if user.project_domain_name == project.domain_name and user.project_name == project.project_name:
             return connection.current_project_id
 
-        try:        
-            domainobject = connection.identity.find_domain(project.domain_name, ignore_missing=False)
-            project = connection.identity.find_project(project.project_name, domain_id = domainobject.id, ignore_missing=False)
+        try:
+            domainobject = connection.identity.find_domain(
+                project.domain_name, ignore_missing=False)
+            project = connection.identity.find_project(
+                project.project_name, domain_id=domainobject.id, ignore_missing=False)
             return project.id
         except Exception as e:
-            raise OpenStackException("Non admin users can not manage resources in projects other then their login project, please use an admin user or create a different Provider for each project") from e
-        
+            raise OpenStackException(
+                "Non admin users can not manage resources in projects other then their login project, please use an admin user or create a different Provider for each project") from e
 
+    @cache(timeout=KEYSTONE_TIMEOUT)
+    def _get_project_domain(self, user: UserReference, project_id:str):
+        connection = self.get_connection(user)
+        if connection.current_project_id == project_id:
+            return (user.project_domain_name, user.project_name)
+
+        project = connection.identity.get_project(project_id)
+
+        domain_id = project.domain_id
+        if connection.current_domain_id == domain_id:
+            return (user.project_domain_name, project.name)
+
+        domain = connection.identity.get_domain(project.domain_id)
+        return (domain.name, project.name)
+
+
+    def get_network(self, user: UserReference, network: NetworkReference):
+        project_id = self.get_project_id(user, network)
+        return self._get_network(user, project_id, network.name)
+
+    @cache(timeout=RESOURCE_TIMEOUT)
+    def _get_network(self, user: UserReference, project_id:str, name:str):
+        networks = list(self.get_connection(user).network.networks(
+            name=name, project_id=project_id))
+
+        if len(networks) == 0:
+            return None
+
+        if len(networks) > 1:
+            raise OpenStackException(
+                "Multiple networks with name `%(name)s` available in project '%(project)s': %(networks)s" % {
+                    "name": name,
+                    "project":project_id, 
+                    "networks":", ".join([n.id for n in networks])})
+
+        return networks[0]
     
+    @cache(timeout=RESOURCE_TIMEOUT)
+    def get_network_reference(self, user: UserReference, network_id:str):
+        try:
+            network = self.get_connection(user).network.get_network(network_id)
+            domain_name, project_name = self._get_project_domain(user, network.project_id)
+            return NetworkReference(
+                name = network.name,
+                domain_name = domain_name,
+                project_name = project_name
+            )
+        except Exception as e:
+            raise OpenStackException("could not find network " + network_id) from e
+
+
+    @cache(timeout=RESOURCE_TIMEOUT)
+    def _get_subnet(self, user: UserReference, project_id:str, name:str):
+        subnets = list(self.get_connection(user).network.subnets(
+            name=name, project_id=project_id))
+
+        if len(subnets) == 0:
+            return None
+
+        if len(subnets) > 1:
+            raise OpenStackException(
+                "Multiple subnets with name `%(name)s` available in project '%(project)s': %(networks)s" % {
+                    "name": name,
+                    "project":project_id, 
+                    "networks":", ".join([n.id for n in subnets])})
+
+        return subnets[0]
 
 
 @provider("openstack::VirtualMachine", name="openstack")
@@ -926,7 +1077,8 @@ class VirtualMachineHandler(OpenStackHandler):
     @cache(timeout=10)
     def get_vm(self, ctx, resource):
         if resource.project == resource.admin_tenant:
-            servers = self._nova.servers.list(search_opts={"name": resource.name})
+            servers = self._nova.servers.list(
+                search_opts={"name": resource.name})
         else:
             try:
                 project_id = self.get_project_id(resource, resource.project)
@@ -948,7 +1100,8 @@ class VirtualMachineHandler(OpenStackHandler):
             return servers[0]
 
         else:
-            raise Exception("Multiple virtual machines with name %s exist." % resource.name)
+            raise Exception(
+                "Multiple virtual machines with name %s exist." % resource.name)
 
     @cache(timeout=10)
     def _port_id(self, port_name):
@@ -983,8 +1136,10 @@ class VirtualMachineHandler(OpenStackHandler):
 
     def _build_nic_list(self, ports):
         # build a list of nics for this server based on the index in the ports
-        no_sort = sorted([p for p in ports if p["index"] == 0], key=lambda x: x["network"])
-        sort = sorted([p for p in ports if p["index"] > 0], key=lambda x: x["index"])
+        no_sort = sorted([p for p in ports if p["index"] == 0],
+                         key=lambda x: x["network"])
+        sort = sorted([p for p in ports if p["index"] > 0],
+                      key=lambda x: x["index"])
 
         return [self._create_nic_config(p) for p in sort] + [self._create_nic_config(p) for p in no_sort]
 
@@ -1000,7 +1155,8 @@ class VirtualMachineHandler(OpenStackHandler):
         keys = {k.name: k for k in self._nova.keypairs.list()}
         if resource.key_name not in keys:
             self._nova.keypairs.create(resource.key_name, resource.key_value)
-            ctx.info("Created a new keypair with name %(name)s", name=resource.key_name)
+            ctx.info("Created a new keypair with name %(name)s",
+                     name=resource.key_name)
 
     def read_resource(self, ctx, resource):
         """
@@ -1013,7 +1169,8 @@ class VirtualMachineHandler(OpenStackHandler):
 
         else:
             resource.purged = False
-            resource.security_groups = [sg.name for sg in server.list_security_group()]
+            resource.security_groups = [
+                sg.name for sg in server.list_security_group()]
             # The port handler has to handle all network/port related changes
 
         ctx.set("server", server)
@@ -1029,7 +1186,8 @@ class VirtualMachineHandler(OpenStackHandler):
         flavor = self._nova.flavors.find(name=resource.flavor)
         nics = self._build_nic_list(resource.ports)
         self._nova.servers.create(resource.name, flavor=flavor.id, userdata=resource.user_data, nics=nics,
-                                  security_groups=self._build_sg_list(ctx, resource.security_groups),
+                                  security_groups=self._build_sg_list(
+                                      ctx, resource.security_groups),
                                   image=resource.image, key_name=resource.key_name, config_drive=resource.config_drive)
         ctx.set_created()
 
@@ -1088,14 +1246,15 @@ class VirtualMachineHandler(OpenStackHandler):
             project_id = self.get_project_id(resource, resource.project)
             network_one = None
             for port in resource.ports:
-                    if port["index"] == 1:
-                        network_one = port["network"]
+                if port["index"] == 1:
+                    network_one = port["network"]
 
             if project_id is not None and network_one is not None:
                 ports = self._neutron.list_ports(device_id=vm.id)
                 for port in ports["ports"]:
                     for ips in port["fixed_ips"]:
-                        subnet = self.get_subnet(project_id, subnet_id=ips["subnet_id"])
+                        subnet = self.get_subnet(
+                            project_id, subnet_id=ips["subnet_id"])
                         if subnet["name"] == network_one:
                             facts["ip_address"] = ips["ip_address"]
 
@@ -1107,22 +1266,21 @@ class VirtualMachineHandler(OpenStackHandler):
 @provider("openstack::Network", name="openstack")
 class NetworkHandler(OpenStackHandlerV2):
 
-    #resource name -> openstack name
+    # resource name -> openstack name
     res_to_os = {
-        "name":"name",
-        "external":"is_router_external",
-        "shared":"is_shared",
-        "physical_network":"provider_physical_network",
-        "network_type":"provider_network_type",
-        "segmentation_id":"provider_segmentation_id"
+        "name": "name",
+        "external": "is_router_external",
+        "shared": "is_shared",
+        "physical_network": "provider_physical_network",
+        "network_type": "provider_network_type",
+        "segmentation_id": "provider_segmentation_id"
     }
 
-    os_to_res = {v:k for k,v in res_to_os.items()}
-
+    os_to_res = {v: k for k, v in res_to_os.items()}
 
     def _create_dict(self, resource: Network, project_id):
         net = {"admin_state_up": True,
-                "project_id": project_id}
+               "project_id": project_id}
 
         for res_field, os_field in self.res_to_os.items():
             value = getattr(resource, res_field)
@@ -1141,26 +1299,15 @@ class NetworkHandler(OpenStackHandlerV2):
 
         return net
 
-    
     def get_network(self, ctx, resource:Network):
         project_id = self.get_project_id(resource.user, resource.project)
         ctx.set("project_id", project_id)
 
-        networks = list(self.get_connection(resource.user).network.networks(name=resource.name, project_id=project_id))
-       
-        if len(networks) == 0:
-            return None
+        network = self._get_network(resource.user, project_id, resource.name)
 
-        if len(networks) > 1:
-            ctx.warning("Multiple networks with the same name available!",
-                name=resource.name,
-                project_id=project_id)
-            return None
-
-        network = networks[0]
-        ctx.set("network_id", network.id)
+        if network is not None:
+            ctx.set("network_id", network.id)
         return network
-
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         network = self.get_network(ctx, resource)
@@ -1179,7 +1326,6 @@ class NetworkHandler(OpenStackHandlerV2):
         else:
             raise ResourcePurged()
 
-    
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         project_id = ctx.get("project_id")
         args = self._create_dict(resource, project_id)
@@ -1196,11 +1342,11 @@ class NetworkHandler(OpenStackHandlerV2):
         network_id = ctx.get("network_id")
         project_id = ctx.get("project_id")
 
-
         update = self._create_dict_diff(resource, project_id, changes)
         ctx.info("preforming update with changes %(changes)s", changes=update)
 
-        self.get_connection(resource.user).network.update_network(network_id, **update)
+        self.get_connection(resource.user).network.update_network(
+            network_id, **update)
 
         ctx.fields_updated(changes.keys())
         ctx.set_updated()
@@ -1214,7 +1360,6 @@ class NetworkHandler(OpenStackHandlerV2):
         except:
             ctx.exception("Failed to get facts")
             return {}
-
 
 
 @provider("openstack::Router", name="openstack")
@@ -1248,7 +1393,8 @@ class RouterHandler(OpenStackHandler):
             if port["name"] == "" or port["name"] not in resource.ports:
                 for subnet in subnets:
                     try:
-                        subnet_details = self._neutron.show_subnet(subnet["subnet_id"])["subnet"]
+                        subnet_details = self._neutron.show_subnet(
+                            subnet["subnet_id"])["subnet"]
                         # skip external networks and neutron networks such as ha networks
                         if subnet_details["network_id"] != external_net_id and subnet_details["tenant_id"] != "":
                             subnet_list.append(subnet_details["name"])
@@ -1267,9 +1413,11 @@ class RouterHandler(OpenStackHandler):
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
-            raise SkipResource("Cannot create network when project id is not yet known.")
+            raise SkipResource(
+                "Cannot create network when project id is not yet known.")
 
-        result = self._neutron.create_router({"router": {"name": resource.name, "tenant_id": project_id}})
+        result = self._neutron.create_router(
+            {"router": {"name": resource.name, "tenant_id": project_id}})
         router_id = result["router"]["id"]
         ctx.info("Created router with id %(id)s", id=router_id)
         ctx.set_created()
@@ -1290,7 +1438,8 @@ class RouterHandler(OpenStackHandler):
             if port["device_owner"] == "network:router_interface":
                 ctx.info("Detatch interface with port id %(port)s from router %(router_id)s",
                          port=port["id"], router_id=router_id)
-                self._neutron.remove_interface_router(router=router_id, body={"port_id": port["id"]})
+                self._neutron.remove_interface_router(
+                    router=router_id, body={"port_id": port["id"]})
 
         self._neutron.delete_router(router_id)
         ctx.set_purged()
@@ -1307,7 +1456,8 @@ class RouterHandler(OpenStackHandler):
                 raise Exception("Unable to find id of subnet %s" % subnet)
 
             subnet_id = subnet_data["subnets"][0]["id"]
-            self._neutron.add_interface_router(router=router_id, body={"subnet_id": subnet_id})
+            self._neutron.add_interface_router(
+                router=router_id, body={"subnet_id": subnet_id})
 
         # subnets to delete
         for subnet in (current - to):
@@ -1317,23 +1467,28 @@ class RouterHandler(OpenStackHandler):
                 raise Exception("Unable to find id of subnet %s" % subnet)
 
             subnet_id = subnet_data["subnets"][0]["id"]
-            self._neutron.remove_interface_router(router=router_id, body={"subnet_id": subnet_id})
+            self._neutron.remove_interface_router(
+                router=router_id, body={"subnet_id": subnet_id})
 
     def _set_gateway(self, router_id, network):
         network = self.get_network(None, name=network)
         if network is None:
-            raise Exception("Unable to set router gateway because the gateway network that does not exist.")
+            raise Exception(
+                "Unable to set router gateway because the gateway network that does not exist.")
 
-        self._neutron.add_gateway_router(router_id, {'network_id': network["id"]})
+        self._neutron.add_gateway_router(
+            router_id, {'network_id': network["id"]})
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         router_id = ctx.get("neutron")["id"]
         if "name" in changes:
-            self._neutron.update_router(router_id, {"router": {"name": resource.name}})
+            self._neutron.update_router(
+                router_id, {"router": {"name": resource.name}})
             ctx.set_updated()
 
         if "subnets" in changes:
-            self._update_subnets(router_id, changes["subnets"]["current"], changes["subnets"]["desired"])
+            self._update_subnets(
+                router_id, changes["subnets"]["current"], changes["subnets"]["desired"])
             ctx.info("Modified subnets of router with id %(id)s", id=router_id)
             ctx.set_updated()
 
@@ -1353,7 +1508,8 @@ class RouterHandler(OpenStackHandler):
         if "routers" not in routers:
             return {}
 
-        filtered_list = [rt for rt in routers["routers"] if rt["name"] == resource.name]
+        filtered_list = [rt for rt in routers["routers"]
+                         if rt["name"] == resource.name]
 
         if len(filtered_list) == 0:
             return {}
@@ -1367,86 +1523,112 @@ class RouterHandler(OpenStackHandler):
 
 
 @provider("openstack::Subnet", name="openstack")
-class SubnetHandler(OpenStackHandler):
-    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        neutron_version = self.facts(ctx, resource)
+class SubnetHandler(OpenStackHandlerV2):
 
-        if len(neutron_version) > 0:
+    def get_subnet(self, ctx, resource:Subnet):
+        project_id = self.get_project_id(resource.user, resource.project)
+        ctx.set("project_id", project_id)
+
+        subnet = self._get_subnet(resource.user, project_id, resource.name)
+        if subnet is not None:
+            ctx.set("subnet_id", subnet.id)
+        return subnet
+
+    def read_resource(self, ctx: handler.HandlerContext, resource: Subnet) -> None:
+        subnet = self.get_subnet(ctx, resource)
+
+        if subnet is not None:
             resource.purged = False
-            resource.id = neutron_version["id"]
-            resource.network_address = neutron_version["cidr"]
-            resource.dhcp = neutron_version["enable_dhcp"]
-            resource.network_id = neutron_version["network_id"]
-            resource.dns_servers = neutron_version["dns_nameservers"]
+            resource.id = subnet.id
+            resource.network_address = subnet.cidr
+            resource.dhcp = subnet.is_dhcp_enabled
+            resource.network = self.get_network_reference(resource.user, subnet.network_id)
+            resource.dns_servers = subnet.dns_nameservers
 
-            pool = neutron_version["allocation_pools"][0]
+            pool = subnet.allocation_pools[0]
             if resource.allocation_start != "" and resource.allocation_end != "":  # only change when they are both set
                 resource.allocation_start = pool["start"]
                 resource.allocation_end = pool["end"]
 
-            ctx.set("neutron", neutron_version)
+            ctx.set("instance", subnet)
         else:
             raise ResourcePurged()
 
-    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        project_id = self.get_project_id(resource, resource.project)
+    def create_resource(self, ctx: handler.HandlerContext, resource: Subnet) -> None:
+        project_id = ctx.get("project_id")
         if project_id is None:
-            raise SkipResource("Cannot create network when project id is not yet known.")
+            raise OpenStackException(
+                "Cannot create network when project id is not yet known.")
 
-        network = self.get_network(project_id, name=resource.network)
+        network = self.get_network(resource.user, resource.network)
         if network is None:
-            raise Exception("Unable to create subnet because of network that does not exist.")
+            raise OpenStackException(
+                "Unable to create subnet because of network that does not exist.")
 
-        body = {"name": resource.name, "network_id": network["id"], "enable_dhcp": resource.dhcp,
-                "cidr": resource.network_address, "ip_version": 4, "tenant_id": project_id}
+        body = {"name": resource.name, 
+                "network_id": network.id, 
+                "enable_dhcp": resource.dhcp,
+                "cidr": resource.network_address, 
+                "ip_version": 4, 
+                "project_id": project_id}
 
         if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
-            body["allocation_pools"] = [{"start": resource.allocation_start, "end": resource.allocation_end}]
+            body["allocation_pools"] = [
+                {"start": resource.allocation_start, "end": resource.allocation_end}]
 
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
 
-        self._neutron.create_subnet({"subnet": body})
+        self.get_connection(resource.user).network.create_subnet(**body)
         ctx.set_created()
 
-    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
-        neutron = ctx.get("neutron")
-        self._neutron.delete_subnet(neutron["id"])
+    def delete_resource(self, ctx: handler.HandlerContext, resource: Subnet) -> None:
+        instance = ctx.get("instance")
+        self.get_connection(resource.user).network.delete_subnet(instance.id)
         ctx.set_purged()
 
-    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
-        neutron = ctx.get("neutron")
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: Subnet) -> None:
+        changes = dict(changes)
+        instance = ctx.get("instance")
 
-        # Send everything that can be updated to the server, the API will figure out what to change
-        body = {"subnet": {"enable_dhcp": resource.dhcp}}
-        if len(resource.allocation_start) > 0 and len(resource.allocation_end) > 0:
+        body = {}
+
+        if "dhcp" in changes:
+            body["enable_dhcp"] = resource.dhcp
+            del changes["dhcp"]
+
+        if "allocation_start" in changes:
             body["allocation_pools"] = [{"start": resource.allocation_start,
                                          "end": resource.allocation_end}]
+            del changes["allocation_start"]
 
-        if len(resource.dns_servers) > 0:
+        if "allocation_end" in changes:
+            body["allocation_pools"] = [{"start": resource.allocation_start,
+                                         "end": resource.allocation_end}]
+            del changes["allocation_end"]
+
+        if "dns_servers" in changes:
             body["dns_nameservers"] = resource.dns_servers
+            del changes["dns_servers"]
 
-        self._neutron.update_subnet(neutron["id"], body)
+        if len(changes) > 0:
+            ctx.error("Can not update the fields %(fields)s", fields=changes.keys(), changes=changes)
+            raise OpenStackException("Can not perform all changes, aborting")
+
+        self.get_connection(resource.user).network.update_subnet(instance.id, **body)
         ctx.set_updated()
 
     @cache(timeout=5)
     def facts(self, ctx, resource):
-        subnets = self._neutron.list_subnets(name=resource.name)
-
-        if "subnets" not in subnets:
+        try:
+            subnet = self.get_subnet(ctx, resource)
+            if subnet is None:
+                return {}
+            return subnet.to_dict()
+        except:
+            ctx.exception("Failed to get facts")
             return {}
 
-        filtered_list = [sn for sn in subnets["subnets"] if sn["name"] == resource.name]
-
-        if len(filtered_list) == 0:
-            return {}
-
-        if len(filtered_list) > 1:
-            LOGGER.warning("Multiple subnets with the same name available!")
-            return {}
-
-        subnet = filtered_list[0]
-        return subnet
 
 
 @provider("openstack::RouterPort", name="openstack")
@@ -1454,7 +1636,8 @@ class RouterPortHandler(OpenStackHandler):
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
-            raise SkipResource("Cannot create network when project id is not yet known.")
+            raise SkipResource(
+                "Cannot create network when project id is not yet known.")
 
         neutron_version = self.facts(ctx, resource)
         ctx.set("neutron", neutron_version)
@@ -1466,23 +1649,27 @@ class RouterPortHandler(OpenStackHandler):
             if neutron_version["device_id"] == "":
                 resource.router = ""
             else:
-                router = self.get_router(router_id=neutron_version["device_id"])
+                router = self.get_router(
+                    router_id=neutron_version["device_id"])
                 resource.router = router["name"]
 
             # Network stuff
-            network = self.get_network(project_id, network_id=neutron_version["network_id"])
+            network = self.get_network(
+                project_id, network_id=neutron_version["network_id"])
             resource.network = network["name"]
             ctx.set("network", network)
 
             # IP address / subnet stuff
             subnet = None
             if len(neutron_version["fixed_ips"]) > 1:
-                raise Exception("This handler only supports ports that have an address in a single subnet.")
+                raise Exception(
+                    "This handler only supports ports that have an address in a single subnet.")
             elif len(neutron_version["fixed_ips"]) == 0:
                 resource.subnet = ""
                 resource.address = ""
             else:
-                subnet = self.get_subnet(project_id, subnet_id=neutron_version["fixed_ips"][0]["subnet_id"])
+                subnet = self.get_subnet(
+                    project_id, subnet_id=neutron_version["fixed_ips"][0]["subnet_id"])
                 resource.subnet = subnet["name"]
                 resource.address = neutron_version["fixed_ips"][0]["ip_address"]
 
@@ -1497,19 +1684,24 @@ class RouterPortHandler(OpenStackHandler):
 
         network = self.get_network(project_id, name=resource.network)
         if network is None:
-            raise SkipResource("Unable to create router port because the network does not exist.")
+            raise SkipResource(
+                "Unable to create router port because the network does not exist.")
 
         subnet = self.get_subnet(project_id, name=resource.subnet)
         if subnet is None:
-            raise SkipResource("Unable to create router port because the subnet does not exist.")
+            raise SkipResource(
+                "Unable to create router port because the subnet does not exist.")
 
         router = self.get_router(project_id, name=resource.router)
         if router is None:
-            raise SkipResource("Unable to create router port because the router does not exist.")
+            raise SkipResource(
+                "Unable to create router port because the router does not exist.")
 
-        body_value = {'port': {'admin_state_up': True, 'name': resource.name, 'network_id': network["id"]}}
+        body_value = {'port': {'admin_state_up': True,
+                               'name': resource.name, 'network_id': network["id"]}}
         if resource.address != "":
-            body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
+            body_value["port"]["fixed_ips"] = [
+                {"subnet_id": subnet["id"], "ip_address": resource.address}]
 
         result = self._neutron.create_port(body=body_value)
 
@@ -1519,7 +1711,8 @@ class RouterPortHandler(OpenStackHandler):
         port_id = result["port"]["id"]
 
         # attach it to the router
-        self._neutron.add_interface_router(router["id"], body={"port_id": port_id})
+        self._neutron.add_interface_router(
+            router["id"], body={"port_id": port_id})
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
@@ -1528,7 +1721,8 @@ class RouterPortHandler(OpenStackHandler):
         if port["device_owner"] == "network:router_interface":
             ctx.info("Detatch interface with port id %(port)s from router %(router_id)s",
                      port=port["id"], router_id=port["device_id"])
-            self._neutron.remove_interface_router(router=port["device_id"], body={"port_id": port["id"]})
+            self._neutron.remove_interface_router(
+                router=port["device_id"], body={"port_id": port["id"]})
         else:
             self._neutron.delete_port(port["id"])
 
@@ -1543,7 +1737,8 @@ class RouterPortHandler(OpenStackHandler):
         if "ports" not in ports:
             return {}
 
-        filtered_list = [port for port in ports["ports"] if port["name"] == resource.name]
+        filtered_list = [port for port in ports["ports"]
+                         if port["name"] == resource.name]
 
         if len(filtered_list) == 0:
             return {}
@@ -1559,7 +1754,8 @@ class RouterPortHandler(OpenStackHandler):
 @provider("openstack::HostPort", name="openstack")
 class HostPortHandler(OpenStackHandler):
     def get_port(self, ctx, network_id, device_id):
-        ports = self._neutron.list_ports(network_id=network_id, device_id=device_id)["ports"]
+        ports = self._neutron.list_ports(
+            network_id=network_id, device_id=device_id)["ports"]
         ctx.debug("Retrieved ports matching network %(network_id)s and device %(device_id)s",
                   network_id=network_id, device_id=device_id, ports=ports)
         if len(ports) > 0:
@@ -1580,26 +1776,31 @@ class HostPortHandler(OpenStackHandler):
                 if vm_state == "active":
                     return vm
 
-            ctx.info("VM for port is not in active state. Waiting and retrying in 5 seconds.")
+            ctx.info(
+                "VM for port is not in active state. Waiting and retrying in 5 seconds.")
             tries += 1
             time.sleep(resource.wait)
 
-        raise SkipResource("Unable to create host port because vm is not in active state")
+        raise SkipResource(
+            "Unable to create host port because vm is not in active state")
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
-            raise SkipResource("Cannot create  a host port when project id is not yet known.")
+            raise SkipResource(
+                "Cannot create  a host port when project id is not yet known.")
         ctx.set("project_id", project_id)
 
         network = self.get_network(None, resource.network)
         if network is None:
-            raise SkipResource("Network %s for port %s not found." % (resource.network, resource.name))
+            raise SkipResource("Network %s for port %s not found." %
+                               (resource.network, resource.name))
         ctx.set("network", network)
 
         vm = self.wait_for_active(ctx, project_id, resource)
         if vm is None:
-            raise SkipResource("Unable to create host port because the vm does not exist.")
+            raise SkipResource(
+                "Unable to create host port because the vm does not exist.")
 
         ctx.set("vm", vm)
 
@@ -1613,7 +1814,8 @@ class HostPortHandler(OpenStackHandler):
             resource.address = port["fixed_ips"][0]["ip_address"]
 
         if len(port["fixed_ips"]) > 0:
-            subnet = self.get_subnet(None, subnet_id=port["fixed_ips"][0]["subnet_id"])
+            subnet = self.get_subnet(
+                None, subnet_id=port["fixed_ips"][0]["subnet_id"])
             if subnet is None:
                 ctx.warning("Unable to find the name of the subnet with id %(subnet_id)s for port %(port_id)s with ip %(ip)s",
                             subnet_id=port["fixed_ips"][0]["subnet_id"], port_id=port["id"],
@@ -1631,13 +1833,15 @@ class HostPortHandler(OpenStackHandler):
             resource.portsecurity = True
             if not resource.portsecurity:
                 # Port security is not enabled in the API, but resource wants to disable it.
-                ctx.warning("Ignoring portsecurity is False because extension is not enabled.")
+                ctx.warning(
+                    "Ignoring portsecurity is False because extension is not enabled.")
 
         resource.allowed_address_pairs = {}
         print(port)
         if len(port["allowed_address_pairs"]) > 0:
             for pair in port["allowed_address_pairs"]:
-                resource.allowed_address_pairs[pair["ip_address"]] = pair["mac_address"]
+                resource.allowed_address_pairs[pair["ip_address"]
+                                               ] = pair["mac_address"]
 
         resource.name = port["name"]
 
@@ -1647,13 +1851,16 @@ class HostPortHandler(OpenStackHandler):
         vm = ctx.get("vm")
         subnet = self.get_subnet(project_id, name=resource.subnet)
         if subnet is None:
-            raise SkipResource("Unable to create host port because the subnet does not exist.")
+            raise SkipResource(
+                "Unable to create host port because the subnet does not exist.")
 
         try:
-            body_value = {'port': {'admin_state_up': True, 'name': resource.name, 'network_id': network["id"]}}
+            body_value = {'port': {'admin_state_up': True,
+                                   'name': resource.name, 'network_id': network["id"]}}
 
             if resource.address != "" and not resource.dhcp:
-                body_value["port"]["fixed_ips"] = [{"subnet_id": subnet["id"], "ip_address": resource.address}]
+                body_value["port"]["fixed_ips"] = [
+                    {"subnet_id": subnet["id"], "ip_address": resource.address}]
 
             if (not ctx.contains("portsecurity") or ctx.get("portsecurity")) and not resource.portsecurity:
                 body_value["port"]["port_security_enabled"] = False
@@ -1685,7 +1892,8 @@ class HostPortHandler(OpenStackHandler):
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource) -> None:
         port = ctx.get("port")
         response = self._neutron.delete_port(port["id"])
-        ctx.info("Deleted port %(port_id)s with response %(response)s", port_id=port["id"], response=response)
+        ctx.info("Deleted port %(port_id)s with response %(response)s",
+                 port_id=port["id"], response=response)
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
@@ -1696,12 +1904,14 @@ class HostPortHandler(OpenStackHandler):
                     self._neutron.update_port(port=port["id"], body={"port": {"port_security_enabled": False,
                                                                               "security_groups": None}})
                 else:
-                    raise SkipResource("Turning port security on again is not supported.")
+                    raise SkipResource(
+                        "Turning port security on again is not supported.")
 
                 del changes["portsecurity"]
 
             if "name" in changes:
-                self._neutron.update_port(port=port["id"], body={"port": {"name": resource.name}})
+                self._neutron.update_port(port=port["id"], body={
+                                          "port": {"name": resource.name}})
                 del changes["name"]
 
             if "allowed_address_pairs" in changes:
@@ -1713,7 +1923,8 @@ class HostPortHandler(OpenStackHandler):
 
                     allowed_address_pairs.append(pair)
 
-                self._neutron.update_port(port=port["id"], body={"port": {"allowed_address_pairs": allowed_address_pairs}})
+                self._neutron.update_port(port=port["id"], body={
+                                          "port": {"allowed_address_pairs": allowed_address_pairs}})
                 del changes["allowed_address_pairs"]
 
             if len(changes) > 0:
@@ -1729,7 +1940,8 @@ class HostPortHandler(OpenStackHandler):
         if "ports" not in ports:
             return {}
 
-        filtered_list = [port for port in ports["ports"] if port["name"] == resource.name]
+        filtered_list = [port for port in ports["ports"]
+                         if port["name"] == resource.name]
 
         if len(filtered_list) == 0:
             return {}
@@ -1767,7 +1979,8 @@ class SecurityGroupHandler(OpenStackHandler):
                 current_rule["remote_ip_prefix"] = rule["remote_ip_prefix"]
 
             elif rule["remote_group_id"] is not None:
-                rgi = self.get_security_group(ctx, group_id=rule["remote_group_id"])
+                rgi = self.get_security_group(
+                    ctx, group_id=rule["remote_group_id"])
                 current_rule["remote_group"] = rgi["name"]
 
             else:
@@ -1842,7 +2055,8 @@ class SecurityGroupHandler(OpenStackHandler):
             if "remote_group" in new_rule:
                 if new_rule["remote_group"] is not None:
                     # lookup the id of the group
-                    groups = self._neutron.list_security_groups(name=new_rule["remote_group"])["security_groups"]
+                    groups = self._neutron.list_security_groups(
+                        name=new_rule["remote_group"])["security_groups"]
                     if len(groups) == 0:
                         # TODO: log skip rule
                         continue  # Do not update this rule
@@ -1859,7 +2073,8 @@ class SecurityGroupHandler(OpenStackHandler):
                 new_rule["protocol"] = None
 
             try:
-                self._neutron.create_security_group_rule({'security_group_rule': new_rule})
+                self._neutron.create_security_group_rule(
+                    {'security_group_rule': new_rule})
             except exceptions.Conflict:
                 LOGGER.exception("Rule conflict for rule %s", new_rule)
                 raise
@@ -1875,7 +2090,8 @@ class SecurityGroupHandler(OpenStackHandler):
         sg = self._neutron.create_security_group({"security_group": {"name": resource.name,
                                                                      "description": resource.description}})
         current_rules = self._build_current_rules(ctx, sg["security_group"])
-        self._update_rules(sg["security_group"]["id"], resource, current_rules, resource.rules)
+        self._update_rules(sg["security_group"]["id"],
+                           resource, current_rules, resource.rules)
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: SecurityGroup) -> None:
@@ -1892,8 +2108,8 @@ class SecurityGroupHandler(OpenStackHandler):
                 time.sleep(resource.wait)
                 tries += 1
 
-        raise SkipResource("Deleting the security group failed, probably because it is still in use.")
-
+        raise SkipResource(
+            "Deleting the security group failed, probably because it is still in use.")
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: SecurityGroup) -> None:
         sg = ctx.get("sg")
@@ -1903,7 +2119,8 @@ class SecurityGroupHandler(OpenStackHandler):
             ctx.set_updated()
 
         if "rules" in changes:
-            self._update_rules(sg["id"], resource, changes["rules"]["current"], changes["rules"]["desired"])
+            self._update_rules(
+                sg["id"], resource, changes["rules"]["current"], changes["rules"]["desired"])
             ctx.set_updated()
 
     @cache(timeout=5)
@@ -1946,7 +2163,8 @@ class FloatingIPHandler(OpenStackHandler):
 
     def _find_available_fips(self, project_id, network_id):
         available_fips = []
-        floating_ips = self._neutron.list_floatingips(floating_network_id=network_id, tenant_id=project_id)["floatingips"]
+        floating_ips = self._neutron.list_floatingips(
+            floating_network_id=network_id, tenant_id=project_id)["floatingips"]
         for fip in floating_ips:
             if fip["port_id"] is None:
                 available_fips.append(fip)
@@ -1957,7 +2175,8 @@ class FloatingIPHandler(OpenStackHandler):
         network_id = self.get_network(None, resource.external_network)["id"]
         project_id = self.get_project_id(resource, resource.project)
         if project_id is None:
-            raise SkipResource("Cannot create a floating ip when project id is not yet known.")
+            raise SkipResource(
+                "Cannot create a floating ip when project id is not yet known.")
         ctx.set("project_id", project_id)
 
         port_id = ctx.get("port_id")
@@ -1975,7 +2194,8 @@ class FloatingIPHandler(OpenStackHandler):
                 fip_id = available_fips[0]["id"]
 
         if fip_id:
-            self._neutron.update_floatingip(fip_id, {"floatingip": {"port_id": port_id, "description": resource.name}})
+            self._neutron.update_floatingip(
+                fip_id, {"floatingip": {"port_id": port_id, "description": resource.name}})
 
         else:
             self._neutron.create_floatingip({"floatingip": {"port_id": port_id, "floating_network_id": network_id,
@@ -2019,10 +2239,12 @@ def keystone_dependencies(config_model, resource_model):
 
     for role in roles:
         if role.project not in projects:
-            raise Exception("The project %s of role %s is not defined in the model." % (role.project, role.role_id))
+            raise Exception("The project %s of role %s is not defined in the model." % (
+                role.project, role.role_id))
 
         if role.user not in users:
-            raise Exception("The user %s of role %s is not defined in the model." % (role.user, role.role_id))
+            raise Exception("The user %s of role %s is not defined in the model." % (
+                role.user, role.role_id))
 
         role.requires.add(projects[role.project])
         role.requires.add(users[role.user])
@@ -2050,7 +2272,8 @@ class ProjectHandler(OpenStackHandler):
         ctx.set_purged()
 
     def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
-        ctx.get("project").update(name=resource.name, description=resource.description, enabled=resource.enabled)
+        ctx.get("project").update(name=resource.name,
+                                  description=resource.description, enabled=resource.enabled)
         ctx.set_updated()
 
     def facts(self, ctx, resource: Project):
@@ -2075,7 +2298,8 @@ class UserHandler(OpenStackHandler):
             # if a password is provided (not ""), check if it works otherwise mark it as "***"
             if resource.password != "":
                 try:
-                    s = keystone_client.Client(auth_url=resource.auth_url, username=resource.name, password=resource.password)
+                    s = keystone_client.Client(
+                        auth_url=resource.auth_url, username=resource.name, password=resource.password)
                     s.authenticate()
                 except Exception:
                     resource.password = "***"
@@ -2084,7 +2308,8 @@ class UserHandler(OpenStackHandler):
             raise ResourcePurged()
 
     def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
-        self._keystone.users.create(resource.name, password=resource.password, email=resource.email, enabled=resource.enabled)
+        self._keystone.users.create(
+            resource.name, password=resource.password, email=resource.email, enabled=resource.enabled)
         ctx.set_created()
 
     def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
@@ -2094,9 +2319,11 @@ class UserHandler(OpenStackHandler):
     def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
         user_id = ctx.get("user").id
         if resource.password != "":
-            self._keystone.users.update(user_id, password=resource.password, email=resource.email, enabled=resource.enabled)
+            self._keystone.users.update(
+                user_id, password=resource.password, email=resource.email, enabled=resource.enabled)
         else:
-            self._keystone.users.update(user_id, email=resource.email, enabled=resource.enabled)
+            self._keystone.users.update(
+                user_id, email=resource.email, enabled=resource.enabled)
         ctx.set_updated()
 
 
@@ -2105,6 +2332,7 @@ class RoleHandler(OpenStackHandler):
     """
         creates roles and user, project, role assocations
     """
+
     def read_resource(self, ctx, resource):
         # get the role
         role = None
@@ -2162,7 +2390,8 @@ class ServiceHandler(OpenStackHandler):
     def read_resource(self, ctx, resource):
         service = None
         try:
-            service = self._keystone.services.find(name=resource.name, type=resource.type)
+            service = self._keystone.services.find(
+                name=resource.name, type=resource.type)
             resource.description = service.description
             resource.purged = False
         except NotFound:
@@ -2174,7 +2403,8 @@ class ServiceHandler(OpenStackHandler):
         ctx.set("service", service)
 
     def create_resource(self, ctx, resource: resources.PurgeableResource) -> None:
-        self._keystone.services.create(resource.name, resource.type, description=resource.description)
+        self._keystone.services.create(
+            resource.name, resource.type, description=resource.description)
         ctx.set_created()
 
     def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
@@ -2182,14 +2412,16 @@ class ServiceHandler(OpenStackHandler):
         ctx.set_purged()
 
     def update_resource(self, ctx, changes: dict, resource: resources.PurgeableResource) -> None:
-        self._keystone.services.update(ctx.get("service"), description=resource.description)
+        self._keystone.services.update(
+            ctx.get("service"), description=resource.description)
         ctx.set_updated()
 
 
 @provider("openstack::EndPoint", name="openstack")
 class EndpointHandler(OpenStackHandler):
 
-    types = {"admin": "admin_url", "internal": "internal_url", "public": "public_url"}
+    types = {"admin": "admin_url",
+             "internal": "internal_url", "public": "public_url"}
 
     def read_resource(self, ctx, resource):
         service = None
@@ -2198,13 +2430,16 @@ class EndpointHandler(OpenStackHandler):
                 service = s
 
         if service is None:
-            raise SkipResource("Unable to find service to which endpoint belongs")
+            raise SkipResource(
+                "Unable to find service to which endpoint belongs")
 
         endpoints = {}
         try:
-            endpoints = {e.interface: e for e in self._keystone.endpoints.list(region=resource.region, service=service)}
+            endpoints = {e.interface: e for e in self._keystone.endpoints.list(
+                region=resource.region, service=service)}
             for k, v in EndpointHandler.types.items():
-                setattr(resource, v, endpoints[k].url if k in endpoints else None)
+                setattr(resource, v,
+                        endpoints[k].url if k in endpoints else None)
 
             resource.purged = False
         except NotFound:
@@ -2232,9 +2467,11 @@ class EndpointHandler(OpenStackHandler):
 
         for k, v in EndpointHandler.types.items():
             if k not in endpoints:
-                self._keystone.endpoints.create(service, url=getattr(resource, v), region=resource.region, interface=k)
+                self._keystone.endpoints.create(service, url=getattr(
+                    resource, v), region=resource.region, interface=k)
                 ctx.set_created()
 
             elif v in changes:
-                self._keystone.endpoints.update(endpoints[k], url=getattr(resource, v))
+                self._keystone.endpoints.update(
+                    endpoints[k], url=getattr(resource, v))
                 ctx.set_updated()

@@ -37,11 +37,11 @@ def random_string():
         random.choice(string.ascii_uppercase + string.digits) for _ in range(10)
     )
 
+
 def pytest_addoption(parser):
     parser.addoption(
         "--noclean", action="store_true", default=False, help="leave tenants after tests"
     )
-
 
 
 @pytest.fixture(scope="session")
@@ -122,18 +122,14 @@ class User(object):
                         password="%(pass)s", 
                         tenant="%(project)s",
                         project_domain_name="%(domain)s",
-                        user_domain_name="%(domain)s")"""%{
-                            "domain":self._domain,
-                            "project":self._tenant,
-                            "username":self._username,
-                            "url":self._auth_url,
-                            "pass":self._password
-                        }
+                        user_domain_name="%(domain)s")""" % {
+            "domain": self._domain,
+            "project": self._tenant,
+            "username": self._username,
+            "url": self._auth_url,
+            "pass": self._password
+        }
 
-         
-
-
-   
 
 class Project(object):
     """
@@ -153,31 +149,48 @@ class Project(object):
     def project_id(self):
         return self.project_object.id
 
-
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
 
-    def grant(self, user:User, role="member"):
-        #don't include domain, as it will fail when user and project are not in the same domain
+    def grant(self, user: User, role="member"):
+        # don't include domain, as it will fail when user and project are not in the same domain
         self._super_admin.connection.grant_role(
             role, user=user.id, project=self.project_object.id
         )
 
-    def assert_network(self, name: str) -> None:
+    def find_network(self, name: str):
         project_id = self.project_object.id
-        inproject = self._admin.connection.network.find_network(name, project_id=project_id)
+        inproject = self._admin.connection.network.find_network(
+            name, project_id=project_id)
         return inproject
 
-    # def assert_subnet(self, name: str) -> None:
-    #     project_id = self.project_object.id
-    #     inproject = self.neutron.list_subnets(project_id=project_id)["subnets"]
-    #     for net in inproject:
-    #         if net["name"] == name:
-    #             return
+    def assert_network(self, name: str):
+        return self.find_network(name)
 
-    #     print(inproject)
-    #     assert False, "could not find %s in %s" % (name, inproject)
+    def create_network(self, name: str, double=False):
+        out = self.find_network(name)
+        if out is not None and not double:
+            return out
+        return self._admin.connection.network.create_network(
+            project_id=self.project_object.id,
+            name=name)
 
+    def find_subnet(self, name: str) -> None:
+        project_id = self.project_object.id
+        inproject = self._admin.connection.network.find_subnet(
+            name, project_id=project_id)
+        return inproject
+
+    def create_subnet(self, name: str, network_id: str,ip_version:int=4, cidr="192.168.50.1/24"):
+        out = self.find_subnet(name)
+        if out is not None:
+            return out
+        return self._admin.connection.network.create_subnet(
+            project_id=self.project_object.id,
+            name=name,
+            network_id=network_id,
+            ip_version=ip_version,
+            cidr=cidr)
 
 class OpenstackTester(object):
     """
@@ -238,27 +251,28 @@ class OpenstackTester(object):
 
         # users
         def grant(user_id, role):
-            #don't include domain, as it will fail when user and project are not in the same domain
+            # don't include domain, as it will fail when user and project are not in the same domain
             self.admin.connection.grant_role(
                 role, user=user_id, project=projectobject.id
             )
 
         def make_user_if_required(name):
-            user = self._admin.connection.get_user(name, domain_id=domainobject.id)
+            user = self._admin.connection.get_user(
+                name, domain_id=domainobject.id)
             passwd = name
 
             userobject = User(
-                    auth_url=self.admin._auth_url,
-                    username=name,
-                    password=passwd,
-                    tenant=projectobject.name,
-                    domain=domainobject.name,
-                )
+                auth_url=self.admin._auth_url,
+                username=name,
+                password=passwd,
+                tenant=projectobject.name,
+                domain=domainobject.name,
+            )
 
             if user is not None:
                 userobject.id = user.id
                 return user, userobject
-           
+
             user = self._admin.connection.create_user(
                 name,
                 password=passwd,
@@ -281,15 +295,15 @@ class OpenstackTester(object):
         user, user_user = make_user_if_required(prefixed_tenant + "user")
         grant(user.id, "member")
 
-        prj = Project(self, 
-        project_object=projectobject,
-        super_admin = self.admin, 
-        admin=admin_user,
-        user = user_user)
+        prj = Project(self,
+                      project_object=projectobject,
+                      super_admin=self.admin,
+                      admin=admin_user,
+                      user=user_user)
 
         if clean_project:
             self.clean_project(prj)
-        
+
         self._projects[key] = prj
         return prj
 
@@ -303,10 +317,12 @@ class OpenstackTester(object):
             ready = True
             for prj in self._projects.values():
                 done = (
-                    self.clean_project(prj) if prj.project_object is not None else True
+                    self.clean_project(
+                        prj) if prj.project_object is not None else True
                 )
                 if prj.project_object is not None and done:
-                    prj._super_admin.connection.delete_project(prj.project_object.id)
+                    prj._super_admin.connection.delete_project(
+                        prj.project_object.id)
                     prj.project_object = None
 
                 if not done:
@@ -319,7 +335,7 @@ class OpenstackTester(object):
             Clean all the resource in the given project
         """
         conn = project._super_admin.connection
-        
+
         project_id = project.project_object.id
         # for server in conn.compute.servers(project_id=project_id, all_tenants=True):
         #     print("Found server:",server)
@@ -332,17 +348,15 @@ class OpenstackTester(object):
         #     if hp["tenant_id"] == project_id:
         #         project.neutron.delete_port(hp["id"])
 
-        # subnets = project.neutron.list_subnets()["subnets"]
-        # for subnet in subnets:
-        #     if subnet["tenant_id"] == project_id:
-        #         project.neutron.delete_subnet(subnet["id"])
+        subnets = conn.network.subnets(project_id=project_id)
+        for subnet in subnets:
+            conn.network.delete_subnet(subnet.id)
 
         networks = conn.network.networks(project_id=project_id)
         for network in networks:
-            conn.network.delete_network(network)
+            conn.network.delete_network(network.id)
 
         return True
-        
 
 
 @pytest.fixture(scope="function")
