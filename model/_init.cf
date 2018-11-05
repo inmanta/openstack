@@ -204,7 +204,7 @@ index RouterPort(router, subnet)
 
 implement RouterPort using providerRequire
 
-RouterPort.subnet [0:1] -- Subnet.routers [0:]
+RouterPort.subnet [1] -- Subnet.routers [0:]
 
 entity HostPort extends Port:
     """
@@ -278,7 +278,7 @@ implement Router using providerRequire
 
 Router.provider [1] -- Provider.routers [0:]
 Router.project [1] -- Project.routers [0:]
-Router.ports [0:] -- RouterPort.router [0:1]
+Router.ports [0:] -- RouterPort.router [1]
 Router.subnets [0:] -- Subnet.router [0:1]
 Router.ext_gateway [0:1] -- Network.routers [0:]
 Router.routes [0:] -- Route.router [0:1]
