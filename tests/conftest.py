@@ -333,10 +333,8 @@ class OpenstackTester(object):
     def get_shared_project_d2(self) -> Project:
         return self.get_project("shared", domain="inmanta-test-domain1")
 
-    def get../../../.virtualenvs/inmanta-openstack/lib/python3.6/site-packages/openstack/connection.py:305:
-ain="default"):
-        """../../../.virtualenvs/inmanta-openstack/lib/python3.6/site-packages/openstack/connection.py:305:
-
+    def get_project(self, name, domain="default"):
+        """
             Get a project with the given name (will be prefixed!). If it already exists a reference is returned
         """
         key = domain + "|" + name
