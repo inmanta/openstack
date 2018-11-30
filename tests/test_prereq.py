@@ -116,7 +116,11 @@ def test_network_isolation(openstack):
 
 import threading
 def test_threading_problem(openstack):
+    print(threading.enumerate())
+
     project = openstack.get_project(SHARED_FIXTURE)
+    print(threading.enumerate())
+
     assert threading.active_count() == 1
     project._admin.connection
     project._user.connection
@@ -126,4 +130,19 @@ def test_threading_problem(openstack):
     assert threading.active_count() == 1
     project._user.connection.identity
     project._user.connection.network.networks()
+    assert threading.active_count() == 1
+
+
+def test_threading_problem_simple(session):
+    assert threading.active_count() == 1
+    conn = connection.Connection(
+        session=session,
+        identity_interface='public',
+        identity_api_version="3.0")
+    projects = conn.identity.projects()
+    print(threading.enumerate())
+    conn.close()
+    print(threading.enumerate())
+    conn.task_manager.join()
+    print(threading.enumerate())
     assert threading.active_count() == 1

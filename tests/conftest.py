@@ -25,11 +25,16 @@ from keystoneauth1 import session as keystone_session
 from keystoneauth1 import exceptions
 from keystoneclient.v3 import client as keystone_client
 from openstack import connection
+from openstack.task_manager import TaskManager, Task
+import openstack.task_manager
 
 import random
 import string
+import functools
 
 PREFIX = "inmanta_unit_test_"
+
+
 
 
 def random_string():
@@ -76,6 +81,120 @@ def neutron(session):
 def keystone(session):
     yield keystone_client.Client(session=session)
 
+
+class NoFuture(object):
+    
+    def __init__(self, result):
+        self._result = result
+    
+    def result(self, timeout=None):
+        return self._result
+
+def nullexecutor(fn, *args, **kwargs):
+    result = fn(*args, **kwargs)
+    return NoFuture(result)
+
+class TaskManagerBypass(TaskManager):
+
+    def __init__(self, *args, **kwargs):
+        pass
+    
+    def _get_wait(self, tag):
+        raise NotImplementedError()
+
+    @property
+    def executor(self):
+        raise NotImplementedError()
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def join(self):
+        pass
+
+    def submit_task(self, task):
+        task.run()
+        ret = task.wait()
+        return ret
+
+    def submit_function(
+            self, method, name=None, run_async=False, tag=None,
+            *args, **kwargs):
+        """ Allows submitting an arbitrary method for work.
+
+        :param method: Callable to run in the TaskManager.
+        :param str name: Name to use for the generated Task object.
+        :param bool run_async: Whether to run this task async or not.
+        :param str tag: Named rate-limiting context for the task.
+        :param args: positional arguments to pass to the method when it runs.
+        :param kwargs: keyword arguments to pass to the method when it runs.
+        """
+        if run_async:
+            payload = functools.partial(
+                nullexecutor, method, *args, **kwargs)
+            task = Task(
+                main=payload, name=name,
+                run_async=run_async,
+                tag=tag)
+        else:
+            task = Task(
+                main=method, name=name,
+                tag=tag,
+                *args, **kwargs)
+        return self.submit_task(task)
+
+    def submit_function_async(self, method, name=None, *args, **kwargs):
+        """ Allows submitting an arbitrary method for async work scheduling.
+
+        :param method: Callable to run in the TaskManager.
+        :param str name: Name to use for the generated Task object.
+        :param args: positional arguments to pass to the method when it runs.
+        :param kwargs: keyword arguments to pass to the method when it runs.
+        """
+        return self.submit_function(
+            method, name=name, run_async=True, *args, **kwargs)
+
+    def pre_run_task(self, task):
+        '''Callback when task enters the task queue
+
+        :param task: the task
+
+        Intended to be overridden by child classes to track task
+        progress.
+        '''
+        self._log.debug(
+            "Manager %s running task %s", self.name, task.name)
+
+    def run_task(self, task):
+        # Never call task.wait() in the run_task call stack because we
+        # might be running in another thread.  The exception-shifting
+        # code is designed so that caller of submit_task (which may be
+        # in a different thread than this run_task) gets the
+        # exception.
+        #
+        # Note all threads go through the threadpool, so this is an
+        # async call.  submit_task will wait() for the final result.
+        task.run()
+
+    def post_run_task(self, elapsed_time, task):
+        '''Callback at task completion
+
+        :param float elapsed_time: time in seconds between task entering
+            queue and finishing
+        :param task: the task
+
+        This function is intended to be overridden by child classes to
+        monitor task runtimes.
+        '''
+        self._log.debug(
+            "Manager %s ran task %s in %ss",
+            self.name, task.name, elapsed_time)
+ 
+#ugly monkey patch to stop openstacksdk from leaking threads
+openstack.task_manager.TaskManager = TaskManagerBypass
 
 class User(object):
     def __init__(
@@ -214,8 +333,10 @@ class OpenstackTester(object):
     def get_shared_project_d2(self) -> Project:
         return self.get_project("shared", domain="inmanta-test-domain1")
 
-    def get_project(self, name, domain="default"):
-        """
+    def get../../../.virtualenvs/inmanta-openstack/lib/python3.6/site-packages/openstack/connection.py:305:
+ain="default"):
+        """../../../.virtualenvs/inmanta-openstack/lib/python3.6/site-packages/openstack/connection.py:305:
+
             Get a project with the given name (will be prefixed!). If it already exists a reference is returned
         """
         key = domain + "|" + name
