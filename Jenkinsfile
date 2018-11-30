@@ -11,6 +11,8 @@ pipeline {
         OS_PROJECT_NAME='admin'
         INMANTA_MODULE_REPO='https://github.com/inmanta/'
         INMANTA_TEST_ENV="${env.WORKSPACE}/env"
+        OS_IDENTITY_API_VERSION=3
+
     } 
 
     stages {
