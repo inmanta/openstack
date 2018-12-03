@@ -20,8 +20,8 @@ import datetime
 import logging
 import time
 import traceback
-import os
 import typing
+import os
 
 import math
 import novaclient.exceptions
@@ -41,6 +41,8 @@ from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
 from novaclient import client as nova_client
 from openstack import connection
+
+from plugins import OpenStackHandlerV2
 
 
 try:
@@ -395,6 +397,56 @@ class Subnet(OpenStackResourceV2):
         return NetworkReference.from_model(resource.network)
 
 
+@resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
+class SecurityGroup(OpenStackResourceV2):
+    """
+        A security group in an OpenStack tenant
+    """
+    fields = ("name", "description", "manage_all", "rules", "retries", "wait")
+
+    @staticmethod
+    def get_rules(exporter, group):
+        rules = []
+        dedup = set()
+        for rule in group.rules:
+            json_rule = {"protocol": rule.ip_protocol,
+                         "direction": rule.direction}
+
+            if rule.port > 0:
+                json_rule["port_range_min"] = rule.port
+                json_rule["port_range_max"] = rule.port
+
+            else:
+                json_rule["port_range_min"] = rule.port_min
+                json_rule["port_range_max"] = rule.port_max
+
+            if json_rule["port_range_min"] == 0:
+                json_rule["port_range_min"] = None
+
+            if json_rule["port_range_max"] == 0:
+                json_rule["port_range_max"] = None
+
+            try:
+                json_rule["remote_ip_prefix"] = rule.remote_prefix
+            except Exception:
+                pass
+
+            try:
+                json_rule["remote_group"] = rule.remote_group.name
+            except Exception:
+                pass
+
+            key = tuple(sorted(json_rule.items()))
+            if key not in dedup:
+                dedup.add(key)
+                rules.append(json_rule)
+            else:
+                LOGGER.warning(
+                    "A duplicate rule exists in security group %s", group.name)
+
+        return rules
+
+
 @resource("openstack::Router", agent="provider.name", id_attribute="name")
 class Router(OpenstackResource):
     """
@@ -484,56 +536,6 @@ class HostPort(Port):
                 pairs[pair.address] = None
 
         return pairs
-
-
-@resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
-class SecurityGroup(OpenstackResource):
-    """
-        A security group in an OpenStack tenant
-    """
-    fields = ("name", "description", "manage_all", "rules", "retries", "wait")
-
-    @staticmethod
-    def get_rules(exporter, group):
-        rules = []
-        dedup = set()
-        for rule in group.rules:
-            json_rule = {"protocol": rule.ip_protocol,
-                         "direction": rule.direction}
-
-            if rule.port > 0:
-                json_rule["port_range_min"] = rule.port
-                json_rule["port_range_max"] = rule.port
-
-            else:
-                json_rule["port_range_min"] = rule.port_min
-                json_rule["port_range_max"] = rule.port_max
-
-            if json_rule["port_range_min"] == 0:
-                json_rule["port_range_min"] = None
-
-            if json_rule["port_range_max"] == 0:
-                json_rule["port_range_max"] = None
-
-            try:
-                json_rule["remote_ip_prefix"] = rule.remote_prefix
-            except Exception:
-                pass
-
-            try:
-                json_rule["remote_group"] = rule.remote_group.name
-            except Exception:
-                pass
-
-            key = tuple(sorted(json_rule.items()))
-            if key not in dedup:
-                dedup.add(key)
-                rules.append(json_rule)
-            else:
-                LOGGER.warning(
-                    "A duplicate rule exists in security group %s", group.name)
-
-        return rules
 
 
 @resource("openstack::FloatingIP", agent="provider.name", id_attribute="name")
@@ -1070,6 +1072,25 @@ class OpenStackHandlerV2(CRUDHandler):
                     "networks":", ".join([n.id for n in subnets])})
 
         return subnets[0]
+
+    @cache(timeout=RESOURCE_TIMEOUT)
+    def get_security_group(self, ctx, name=None, group_id=None):
+        """
+            Get security group details from openstack
+        """
+        if name is not None:
+            sgs = self._neutron.list_security_groups(name=name)
+        elif group_id is not None:
+            sgs = self._neutron.list_security_groups(id=group_id)
+
+        if len(sgs["security_groups"]) == 0:
+            return None
+        elif len(sgs["security_groups"]) > 1:
+            ctx.warning("Multiple security groups with name %(name)s exist.",
+                        name=name, groups=sgs["security_groups"])
+
+        return sgs["security_groups"][0]
+
 
 
 @provider("openstack::VirtualMachine", name="openstack")
@@ -1962,7 +1983,7 @@ class HostPortHandler(OpenStackHandler):
 
 
 @provider("openstack::SecurityGroup", name="openstack")
-class SecurityGroupHandler(OpenStackHandler):
+class SecurityGroupHandler(OpenStackHandlerV2):
     def _build_current_rules(self, ctx, security_group):
         rules = []
         for rule in security_group["security_group_rules"]:
