@@ -243,6 +243,7 @@ entity Subnet extends OpenStackResource:
     string allocation_start=""
     string allocation_end=""
     ip::ip[] dns_servers=[]
+    ip::ip? gateway_ip
 end
 
 implement Subnet using providerRequire

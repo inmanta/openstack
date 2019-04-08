@@ -216,11 +216,18 @@ class Subnet(OpenstackResource):
     """
         This class represent a subnet in neutron
     """
-    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network", "dns_servers")
+    fields = ("name", "network_address", "dhcp", "allocation_start", "allocation_end", "network", "dns_servers", "gateway_ip")
 
     @staticmethod
     def get_network(_, subnet):
         return subnet.network.name
+
+    @staticmethod
+    def get_gateway_ip(_, subnet):
+        try:
+            return subnet.gateway_ip
+        except ast.OptionalValueException:
+            return None
 
 
 @resource("openstack::Router", agent="provider.name", id_attribute="name")
@@ -1162,6 +1169,9 @@ class SubnetHandler(OpenStackHandler):
                 resource.allocation_start = pool["start"]
                 resource.allocation_end = pool["end"]
 
+            if resource.gateway_ip is not None:
+                resource.gateway_ip = neutron_version["gateway_ip"]
+
             ctx.set("neutron", neutron_version)
         else:
             raise ResourcePurged()
@@ -1184,6 +1194,9 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
 
+        if resource.gateway_ip is not None:
+            body["gateway_ip"] = resource.gateway_ip
+
         self._neutron.create_subnet({"subnet": body})
         ctx.set_created()
 
@@ -1203,6 +1216,9 @@ class SubnetHandler(OpenStackHandler):
 
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
+
+        if resource.gateway_ip is not None:
+            body["gateway_ip"] = resource.gateway_ip
 
         self._neutron.update_subnet(neutron["id"], body)
         ctx.set_updated()
