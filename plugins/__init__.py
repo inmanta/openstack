@@ -1073,7 +1073,7 @@ class RouterHandler(OpenStackHandler):
         ports = self._neutron.list_ports(device_id=router_id)["ports"]
         for port in ports:
             if port["device_owner"] == "network:router_interface":
-                ctx.info("Detatch interface with port id %(port)s from router %(router_id)s",
+                ctx.info("Detach interface with port id %(port)s from router %(router_id)s",
                          port=port["id"], router_id=router_id)
                 self._neutron.remove_interface_router(router=router_id, body={"port_id": port["id"]})
 
@@ -1320,7 +1320,7 @@ class RouterPortHandler(OpenStackHandler):
         port = ctx.get("neutron")
 
         if port["device_owner"] == "network:router_interface":
-            ctx.info("Detatch interface with port id %(port)s from router %(router_id)s",
+            ctx.info("Detach interface with port id %(port)s from router %(router_id)s",
                      port=port["id"], router_id=port["device_id"])
             self._neutron.remove_interface_router(router=port["device_id"], body={"port_id": port["id"]})
         else:
