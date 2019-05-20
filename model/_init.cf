@@ -165,7 +165,7 @@ end
 Network networks [0:] -- [1] Provider provider
 Project project [1] -- [0:] Network networks
 
-index Network(provider, project, name)
+index Network(provider, name)
 
 implement Network using providerRequire
 
@@ -200,7 +200,7 @@ entity RouterPort extends Port:
     string name
 end
 
-index RouterPort(provider, router, subnet)
+index RouterPort(router, subnet)
 
 implement RouterPort using providerRequire
 
@@ -248,7 +248,7 @@ end
 
 implement Subnet using providerRequire
 
-index Subnet(provider, network, name)
+index Subnet(network, name)
 
 Subnet.provider [1] -- Provider.subnets [0:]
 Subnet.project [1] -- Project.subnets [0:]
@@ -273,7 +273,7 @@ entity Router extends OpenStackResource:
     bool distributed=false
 end
 
-index Router(provider, project, name)
+index Router(provider, name)
 
 implement Router using providerRequire
 
@@ -301,7 +301,7 @@ entity SecurityGroup extends OpenStackResource:
     number wait=5
 end
 
-index SecurityGroup(provider, project, name)
+index SecurityGroup(project, name)
 
 implement SecurityGroup using sg, providerRequire
 
@@ -350,7 +350,7 @@ implementation fipName for FloatingIP:
     # We need a consistent and unique name to identity the fip
     self.name = "{{external_network.name}}_{{port.name}}"
 end
-index FloatingIP(provider, external_network, port)
+index FloatingIP(external_network, port)
 
 implementation fipAddr for FloatingIP:
     self.address = std::getfact(self, "ip_address")
@@ -377,7 +377,7 @@ entity VirtualMachine extends OpenStackResource, VMAttributes:
 end
 implement VirtualMachine using providerRequire
 
-index VirtualMachine(provider, project, name)
+index VirtualMachine(provider, name)
 
 VirtualMachine.eth0_port [1] -- HostPort
 VirtualMachine.key_pair [1] -- ssh::Key
