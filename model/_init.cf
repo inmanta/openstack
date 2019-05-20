@@ -231,7 +231,7 @@ implement HostPort using providerRequire
 HostPort.subnet [1] -- Subnet.host_ports [0:]
 HostPort.vm [1] -- VirtualMachine.ports [0:]
 
-index HostPort(provider, name)
+index HostPort(provider, vm, name)
 
 entity Subnet extends OpenStackResource:
     """
@@ -248,7 +248,7 @@ end
 
 implement Subnet using providerRequire
 
-index Subnet(name)
+index Subnet(network, name)
 
 Subnet.provider [1] -- Provider.subnets [0:]
 Subnet.project [1] -- Project.subnets [0:]
@@ -273,7 +273,7 @@ entity Router extends OpenStackResource:
     bool distributed=false
 end
 
-index Router(name)
+index Router(provider, name)
 
 implement Router using providerRequire
 
