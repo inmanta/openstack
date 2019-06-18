@@ -92,7 +92,7 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
             if t > selected[0]:
                 selected = (t, image)
 
-    if len(selected) < 2 or selected[1]["id"] is None:
+    if selected[1] is None:
         raise Exception("No image found for os %s and version %s" % (os.name, os.version))
 
     return selected[1]["id"]
@@ -1902,11 +1902,12 @@ class RoleHandler(OpenStackHandler):
     def read_resource(self, ctx, resource):
         # get the role
         role = None
+        resource.purged = False
         try:
             role = self._keystone.roles.find(name=resource.role)
         except NotFound:
-            ctx.info("Role %(role)s does not exit yet.", role=resource.role)
-            pass
+            ctx.info("Role %(role)s does not exist yet.", role=resource.role)
+            resource.purged = True
 
         try:
             user = self._keystone.users.find(name=resource.user)
@@ -1918,11 +1919,11 @@ class RoleHandler(OpenStackHandler):
         except NotFound:
             raise SkipResource("The project does not exist.")
 
-        try:
-            self._keystone.roles.check(role=role, user=user, project=project)
-            resource.purged = False
-        except Exception:
-            resource.purged = True
+        if role is not None:
+            try:
+                self._keystone.roles.check(role=role, user=user, project=project)
+            except Exception:
+                resource.purged = True
 
         ctx.set("role", role)
         ctx.set("user", user)
@@ -1932,8 +1933,9 @@ class RoleHandler(OpenStackHandler):
         user = ctx.get("user")
         project = ctx.get("project")
         role = ctx.get("role")
-
+        
         if role is None:
+            ctx.info("Creating Role %(role)s", role=resource.role)
             role = self._keystone.roles.create(resource.role)
 
         self._keystone.roles.grant(user=user, role=role, project=project)
