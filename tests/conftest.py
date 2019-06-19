@@ -137,19 +137,19 @@ class Project(object):
 
     @property
     def session(self):
-        return self.user.session
+        return self._user.session
 
     @property
     def nova(self):
-        return self.user.nova
+        return self._user.nova
 
     @property
     def neutron(self):
-        return self.user.neutron
+        return self._user.neutron
 
     @property
     def keystone(self):
-        return self.user.keystone
+        return self._user.keystone
 
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
@@ -204,7 +204,6 @@ class OpenstackTester(object):
                 domain, description="Unit test domain"
             )
         assert domainobject is not None
-        print("D", domainobject)
 
         # create the project and add the user to that project
         clean_project = False
@@ -216,8 +215,6 @@ class OpenstackTester(object):
             # create the project
             project = self.admin.keystone.projects.create(prefixed_tenant, description="Unit test project", enabled=True,
                                                           domain=domainobject.id)
-            prj.project_object = project
-
         # users
         def grant(user_id, role):
             # don't include domain, as it will fail when user and project are not in the same domain
@@ -266,8 +263,6 @@ class OpenstackTester(object):
         #create user with user role
         user, user_user = make_user_if_required(prefixed_tenant + "user")
         grant(user.id, "member")
-
-
 
         prj = Project(self,
                 project_object=project,
