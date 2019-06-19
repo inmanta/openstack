@@ -3,6 +3,7 @@ pipeline {
 
     options{
         checkoutToSubdirectory('openstack')
+        disableConcurrentBuilds()
     }
 
     environment {
