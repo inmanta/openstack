@@ -29,6 +29,8 @@ from inmanta import resources, ast
 from inmanta.agent import handler
 from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
 from inmanta.export import dependency_manager
+from inmanta.execute.util import Unknown
+
 from inmanta.plugins import plugin
 
 from neutronclient.common import exceptions
@@ -71,31 +73,34 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
         :param os: The operating system and version (using os_distro and os_version metadata)
         :param name: An optional string that the image name should contain
     """
-    global IMAGES
-    if provider.name not in IMAGES:
-        auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
-                           password=provider.password, project_name=provider.tenant,
-                           user_domain_id="default", project_domain_id="default")
-        sess = session.Session(auth=auth)
-        client = glance_client.Client("2", session=sess)
+    try:
+        global IMAGES
+        if provider.name not in IMAGES:
+            auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+                            password=provider.password, project_name=provider.tenant,
+                            user_domain_id="default", project_domain_id="default")
+            sess = session.Session(auth=auth)
+            client = glance_client.Client("2", session=sess)
 
-        IMAGES[provider.name] = list(client.images.list())
+            IMAGES[provider.name] = list(client.images.list())
 
-    selected = (datetime.datetime(1900, 1, 1), None)
-    for image in IMAGES[provider.name]:
-        # only images that are public
-        if ("image_location" not in image and image["visibility"] == "public") and \
-           ("os_distro" in image and "os_version" in image) and \
-           (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
-           (name is None or name in image["name"]):
-            t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
-            if t > selected[0]:
-                selected = (t, image)
+        selected = (datetime.datetime(1900, 1, 1), None)
+        for image in IMAGES[provider.name]:
+            # only images that are public
+            if ("image_location" not in image and image["visibility"] == "public") and \
+            ("os_distro" in image and "os_version" in image) and \
+            (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
+            (name is None or name in image["name"]):
+                t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+                if t > selected[0]:
+                    selected = (t, image)
 
-    if selected[1] is None:
-        raise Exception("No image found for os %s and version %s" % (os.name, os.version))
+        if selected[1] is None:
+            raise Exception("No image found for os %s and version %s" % (os.name, os.version))
 
-    return selected[1]["id"]
+        return selected[1]["id"]
+    except Exception:
+        return Unknown(None)
 
 FLAVORS = {}
 
