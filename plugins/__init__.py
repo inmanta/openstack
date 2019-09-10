@@ -38,7 +38,7 @@ from neutronclient.neutron import client as neutron_client
 
 from novaclient import client as nova_client
 import novaclient.exceptions
-
+import keystoneauth1.exceptions
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
 from keystoneclient.v3 import client as keystone_client
@@ -83,24 +83,26 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
             client = glance_client.Client("2", session=sess)
 
             IMAGES[provider.name] = list(client.images.list())
-
-        selected = (datetime.datetime(1900, 1, 1), None)
-        for image in IMAGES[provider.name]:
-            # only images that are public
-            if ("image_location" not in image and image["visibility"] == "public") and \
-            ("os_distro" in image and "os_version" in image) and \
-            (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
-            (name is None or name in image["name"]):
-                t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
-                if t > selected[0]:
-                    selected = (t, image)
-
-        if selected[1] is None:
-            raise Exception("No image found for os %s and version %s" % (os.name, os.version))
-
-        return selected[1]["id"]
-    except Exception:
+    except keystoneauth1.exceptions.connection.ConnectFailure:
+        # Make sure that the model compiles when the openstack instance is down
         return Unknown(None)
+
+    selected = (datetime.datetime(1900, 1, 1), None)
+    for image in IMAGES[provider.name]:
+        # only images that are public
+        if ("image_location" not in image and image["visibility"] == "public") and \
+        ("os_distro" in image and "os_version" in image) and \
+        (image["os_distro"].lower() == os.name.lower() and image["os_version"].lower() == str(os.version).lower()) and \
+        (name is None or name in image["name"]):
+            t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+            if t > selected[0]:
+                selected = (t, image)
+
+    if selected[1] is None:
+        raise Exception("No image found for os %s and version %s" % (os.name, os.version))
+
+    return selected[1]["id"]
+
 
 FLAVORS = {}
 
