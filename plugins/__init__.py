@@ -92,7 +92,7 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
             if t > selected[0]:
                 selected = (t, image)
 
-    if len(selected) < 2 or selected[1]["id"] is None:
+    if len(selected) < 2 or selected[1] is None:
         raise Exception("No image found for os %s and version %s" % (os.name, os.version))
 
     return selected[1]["id"]

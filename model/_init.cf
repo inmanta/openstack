@@ -406,7 +406,7 @@ implement Host using eth0Port when subnet is defined
 
 implementation openstackVM for Host:
     self.vm = VirtualMachine(name=name, key_pair=key_pair, project=project, provider=provider, user_data=user_data, image=image,
-                             flavor=flavor, purged=purged, security_groups=security_groups)
+                             flavor=flavor, purged=purged, security_groups=security_groups, config_drive=config_drive)
     self.requires = self.vm
 end
 
