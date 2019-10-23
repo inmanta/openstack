@@ -427,12 +427,12 @@ entity Flavor extends OpenStackResource:
     number ram
     number vcpus
     number disk
-    string flavorid
-    number ephemeral
-    number swap
-    number rxtx_factor
-    bool is_public
-    string description
+    string flavorid = "auto"
+    number ephemeral = 0
+    number swap = 0
+    number rxtx_factor = 1.0
+    bool is_public = true
+    string? description = null
 end
 
 implement Flavor using providerRequire
