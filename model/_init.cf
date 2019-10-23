@@ -375,6 +375,7 @@ end
 entity VirtualMachine extends OpenStackResource, VMAttributes:
     string name
 end
+
 implement VirtualMachine using providerRequire
 
 index VirtualMachine(provider, name)
@@ -418,3 +419,18 @@ end
 
 implement VirtualMachine using userData when install_agent
 implement Host using userData when install_agent
+
+index Flavor (provider, name)
+Flavor.provider [1] -- Provider.flavors [0:]
+entity Flavor extends OpenStackResource:
+    string name
+    number ram
+    number vcpus
+    number disk
+    string flavorid
+    number ephemeral
+    number swap
+    number rxtx_factor
+    bool is_public
+    string description
+end

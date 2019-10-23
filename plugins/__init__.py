@@ -157,6 +157,12 @@ class OpenstackResource(PurgeableResource, ManagedResource):
     def get_auth_url(exporter, resource):
         return resource.provider.connection_url
 
+@resource("openstack::Flavor", agent="provider.name", id_attribute="name")
+class Flavor(OpenstackResource):
+    """
+        A flavor is an available hardware configuration for a server.
+    """
+    fields = ("name", "ram", "vcpus", "disk", "flavorid", "ephemeral", "swap", "rxtx_factor", "is_public", "description")
 
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
 class VirtualMachine(OpenstackResource):
