@@ -434,3 +434,5 @@ entity Flavor extends OpenStackResource:
     bool is_public
     string description
 end
+
+implement Flavor using providerRequire
