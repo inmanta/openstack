@@ -22,6 +22,7 @@ import logging
 import time
 import datetime
 import math
+import base64
 
 from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
@@ -49,8 +50,8 @@ except ImportError:
     from keystoneclient.openstack.common.apiclient.exceptions import NotFound
 
 # silence a logger
-loud_logger = logging.getLogger("requests.packages.urllib3.connectionpool")
-loud_logger.propagate = False
+#loud_logger = logging.getLogger("requests.packages.urllib3.connectionpool")
+#loud_logger.propagate = False
 
 
 LOGGER = logging.getLogger(__name__)
@@ -163,7 +164,8 @@ class VirtualMachine(OpenstackResource):
     """
         A virtual machine managed by a hypervisor or IaaS
     """
-    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups", "config_drive")
+    fields = ("name", "flavor", "image", "key_name", "user_data", "key_value", "ports", "security_groups", "config_drive",
+              "metadata", "personality")
 
     @staticmethod
     def get_key_name(exporter, vm):
@@ -208,7 +210,7 @@ class Network(OpenstackResource):
     """
         This class represents a network in neutron
     """
-    fields = ("name", "external", "physical_network", "network_type", "segmentation_id", "shared")
+    fields = ("name", "external", "physical_network", "network_type", "segmentation_id", "shared", "vlan_transparent")
 
 
 @resource("openstack::Subnet", agent="provider.name", id_attribute="name")
@@ -848,9 +850,12 @@ class VirtualMachineHandler(OpenStackHandler):
         self._ensure_key(ctx, resource)
         flavor = self._nova.flavors.find(name=resource.flavor)
         nics = self._build_nic_list(resource.ports)
-        self._nova.servers.create(resource.name, flavor=flavor.id, userdata=resource.user_data, nics=nics,
-                                  security_groups=self._build_sg_list(ctx, resource.security_groups),
-                                  image=resource.image, key_name=resource.key_name, config_drive=resource.config_drive)
+        args = dict(flavor=flavor.id, userdata=resource.user_data, nics=nics,
+                    security_groups=self._build_sg_list(ctx, resource.security_groups),
+                    image=resource.image, key_name=resource.key_name, config_drive=resource.config_drive,
+                    meta=resource.metadata, files=resource.personality)
+        ctx.info("Creating server with name %(name)s and options", name=resource.name, options=args)
+        self._nova.servers.create(resource.name, **args)
         ctx.set_created()
 
     def delete_resource(self, ctx, resource: resources.PurgeableResource) -> None:
@@ -932,6 +937,9 @@ class NetworkHandler(OpenStackHandler):
         if len(network) > 0:
             resource.purged = False
             resource.external = network["router:external"]
+            if "vlan_transparent" in network and network["vlan_transparent"] is not None:
+                resource.vlan_transparent = network["vlan_transparent"]
+
             if resource.physical_network != "":
                 resource.physical_network = network["provider:physical_network"]
 
@@ -959,6 +967,9 @@ class NetworkHandler(OpenStackHandler):
 
         if resource.segmentation_id > 0:
             net["provider:segmentation_id"] = resource.segmentation_id
+
+        if resource.vlan_transparent is not None:
+            net["vlan_transparent"] = resource.vlan_transparent
 
         return net
 
@@ -1412,7 +1423,6 @@ class HostPortHandler(OpenStackHandler):
                 ctx.warning("Ignoring portsecurity is False because extension is not enabled.")
 
         resource.allowed_address_pairs = {}
-        print(port)
         if len(port["allowed_address_pairs"]) > 0:
             for pair in port["allowed_address_pairs"]:
                 resource.allowed_address_pairs[pair["ip_address"]] = pair["mac_address"]

@@ -160,6 +160,7 @@ entity Network extends OpenStackResource:
     string network_type=""
     number segmentation_id=0
     bool shared=false
+    bool? vlan_transparent=null
 end
 
 Network networks [0:] -- [1] Provider provider
@@ -364,9 +365,22 @@ FloatingIP floating_ips [0:] -- [1] Network external_network
 FloatingIP floating_ips [0:] -- [1] HostPort port
 
 entity VMAttributes extends platform::UserdataVM:
+    """
+        Entity with vm attributes that can be used for a virtual machine and a host
+
+        :param flavor: The uuid of the flavor
+        :param image: The uuid of the image
+        :param user_data: The user_data script to pass
+        :param metadata: A dict of metadata items
+        :param personality: A dict of files (personality)
+        :param config_drive: Attach a configuration drive to the vm
+        :param install_agent: Create a script and pass it as user_data to install the inmanta agent at boot time.
+    """
     string flavor
     string image
     string user_data
+    dict metadata={}
+    dict personality={}
     bool config_drive=false
     bool install_agent=false
 end
@@ -405,7 +419,8 @@ implement Host using eth0Port when subnet is defined
 
 implementation openstackVM for Host:
     self.vm = VirtualMachine(name=name, key_pair=key_pair, project=project, provider=provider, user_data=user_data, image=image,
-                             flavor=flavor, purged=purged, security_groups=security_groups)
+                             flavor=flavor, purged=purged, security_groups=security_groups, metadata=self.metadata, 
+                             personality=self.personality)
     self.requires = self.vm
 end
 
