@@ -232,7 +232,7 @@ implement HostPort using providerRequire
 HostPort.subnet [1] -- Subnet.host_ports [0:]
 HostPort.vm [1] -- VirtualMachine.ports [0:]
 
-index HostPort(provider, name)
+index HostPort(provider, vm, name)
 
 entity Subnet extends OpenStackResource:
     """
@@ -244,11 +244,12 @@ entity Subnet extends OpenStackResource:
     string allocation_start=""
     string allocation_end=""
     ip::ip[] dns_servers=[]
+    ip::ip? gateway_ip
 end
 
 implement Subnet using providerRequire
 
-index Subnet(name)
+index Subnet(network, name)
 
 Subnet.provider [1] -- Provider.subnets [0:]
 Subnet.project [1] -- Project.subnets [0:]
@@ -273,7 +274,7 @@ entity Router extends OpenStackResource:
     bool distributed=false
 end
 
-index Router(name)
+index Router(provider, name)
 
 implement Router using providerRequire
 
@@ -419,8 +420,8 @@ implement Host using eth0Port when subnet is defined
 
 implementation openstackVM for Host:
     self.vm = VirtualMachine(name=name, key_pair=key_pair, project=project, provider=provider, user_data=user_data, image=image,
-                             flavor=flavor, purged=purged, security_groups=security_groups, metadata=self.metadata, 
-                             personality=self.personality)
+                             flavor=flavor, purged=purged, security_groups=security_groups, config_drive=config_drive,
+                             metadata=self.metadata, personality=self.personality)
     self.requires = self.vm
 end
 
