@@ -134,12 +134,8 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
     return selected[1].name
 
 
-class OpenstackResource(PurgeableResource, ManagedResource):
-    fields = ("project", "admin_user", "admin_password", "admin_tenant", "auth_url")
-
-    @staticmethod
-    def get_project(exporter, resource):
-        return resource.project.name
+class OpenstackAdminResource(PurgeableResource, ManagedResource):
+    fields = ("admin_user", "admin_password", "admin_tenant", "auth_url")
 
     @staticmethod
     def get_admin_user(exporter, resource):
@@ -157,12 +153,34 @@ class OpenstackResource(PurgeableResource, ManagedResource):
     def get_auth_url(exporter, resource):
         return resource.provider.connection_url
 
+
+class OpenstackResource(OpenstackAdminResource):
+    fields = ("project",)
+
+    @staticmethod
+    def get_project(exporter, resource):
+        return resource.project.name
+
+
 @resource("openstack::Flavor", agent="provider.name", id_attribute="name")
-class Flavor(OpenstackResource):
+class Flavor(OpenstackAdminResource):
     """
         A flavor is an available hardware configuration for a server.
     """
-    fields = ("name", "ram", "vcpus", "disk", "flavorid", "ephemeral", "swap", "rxtx_factor", "is_public", "description")
+    fields = (
+        "name",
+        "ram",
+        "vcpus",
+        "disk",
+        "flavorid",
+        "ephemeral",
+        "swap",
+        "rxtx_factor",
+        "is_public",
+        "description",
+        "extra_specs"
+    )
+
 
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
 class VirtualMachine(OpenstackResource):
@@ -582,7 +600,6 @@ RESOURCE_TIMEOUT = 10
 
 
 class OpenStackHandler(CRUDHandler):
-
     @cache(timeout=CRED_TIMEOUT)
     def get_session(self, auth_url, project, admin_user, admin_password):
         auth = v3.Password(auth_url=auth_url, username=admin_user, password=admin_password, project_name=project,
@@ -752,6 +769,32 @@ class OpenStackHandler(CRUDHandler):
             ctx.warning("Multiple security groups with name %(name)s exist.", name=name, groups=sgs["security_groups"])
 
         return sgs["security_groups"][0]
+
+
+@provider("openstack::Flavor", name="openstack")
+class FlavorHandler(OpenStackHandler):
+    def read_resource(self, ctx, resource):
+        flavors = self._nova.flavors.list()
+        matching_flavors = [flavor for flavor in flavors if resource.name == flavor.name]
+        if not matching_flavors:
+            raise ResourcePurged()
+        elif len(matching_flavors) > 1:
+            ctx.warning("More than one flavor with name {}".format(resource.name))
+            raise Exception("More than one flavor with name {}".format(resource.name))
+        else:
+            if not resource.flavorid == "auto":
+                resource.flavorid = matching_flavors.id
+
+            resource.purged = False
+            resource.ram = matching_flavors.ram
+            resource.vcpus = matching_flavors.vcpus
+            resource.disk = matching_flavors.disk
+            resource.ephemeral = matching_flavors.ephemeral
+            resource.swap = matching_flavors.swap
+            resource.rxtx_factor = matching_flavors.rxtx_factor
+            resource.description = matching_flavors.description
+            resource.is_public = matching_flavors.is_public
+            resource.extra_specs = matching_flavors.extra_specs
 
 
 @provider("openstack::VirtualMachine", name="openstack")
