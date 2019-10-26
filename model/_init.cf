@@ -433,7 +433,7 @@ entity Flavor extends OpenStackResource:
     number rxtx_factor = 1.0
     bool is_public = true
     dict extra_specs = {}
-    string? description = null
+    string description = ""
 end
 
 implement Flavor using providerRequire

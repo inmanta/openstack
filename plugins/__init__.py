@@ -778,23 +778,53 @@ class FlavorHandler(OpenStackHandler):
         matching_flavors = [flavor for flavor in flavors if resource.name == flavor.name]
         if not matching_flavors:
             raise ResourcePurged()
+
         elif len(matching_flavors) > 1:
             ctx.warning("More than one flavor with name {}".format(resource.name))
             raise Exception("More than one flavor with name {}".format(resource.name))
+
         else:
             if not resource.flavorid == "auto":
                 resource.flavorid = matching_flavors.id
 
+            matching_flavor = matching_flavors[0]
             resource.purged = False
-            resource.ram = matching_flavors.ram
-            resource.vcpus = matching_flavors.vcpus
-            resource.disk = matching_flavors.disk
-            resource.ephemeral = matching_flavors.ephemeral
-            resource.swap = matching_flavors.swap
-            resource.rxtx_factor = matching_flavors.rxtx_factor
-            resource.description = matching_flavors.description
-            resource.is_public = matching_flavors.is_public
-            resource.extra_specs = matching_flavors.extra_specs
+            resource.ram = matching_flavor.ram
+            resource.vcpus = matching_flavor.vcpus
+            resource.disk = matching_flavor.disk
+            resource.ephemeral = matching_flavor.ephemeral
+
+            if matching_flavor.swap:
+                resource.swap = matching_flavor.swap
+            else:
+                resource.swap = 0
+
+            resource.rxtx_factor = matching_flavor.rxtx_factor
+            try:
+                resource.description = matching_flavor.description
+            except AttributeError:
+                resource.description = ""
+
+            resource.is_public = matching_flavor.is_public
+
+            try:
+                resource.extra_specs = matching_flavor.extra_specs
+            except AttributeError:
+                resource.extra_specs = {}
+
+    def create_resource(self, ctx, resource):
+        self._nova.flavors.create(
+            resource.name,
+            resource.ram,
+            resource.vcpus,
+            resource.disk,
+            resource.flavorid,
+            resource.ephemeral,
+            resource.swap,
+            resource.rxtx_factor,
+            resource.is_public,
+            resource.description
+        )
 
 
 @provider("openstack::VirtualMachine", name="openstack")
