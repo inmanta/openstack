@@ -834,7 +834,7 @@ class FlavorHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        self._nova.flavors.delete(resource.flavorid)
+        self._nova.flavors.delete(resource.flavor_id)
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
@@ -850,6 +850,7 @@ class FlavorHandler(OpenStackHandler):
 
             flavor.unset_keys(unset_keys)
             flavor.set_keys(new_extra_specs)
+        ctx.set_updated()
 
 
 @provider("openstack::VirtualMachine", name="openstack")

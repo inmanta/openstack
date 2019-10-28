@@ -138,5 +138,21 @@ import openstack
 tenant = std::get_env("OS_PROJECT_NAME")
 provider = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                         password=std::get_env("OS_PASSWORD"), tenant=tenant)
+flavor=openstack::Flavor(
+    provider=provider,
+    name="{flavor_name}",
+    ram=1024,
+    vcpus=4,
+    disk=10,
+    extra_specs={{
+        "quota:cpu_period": 20000,
+        "hw:watchdog_action": "reset"
+    }},
+    purged=true
+)
 """)
-    assert not project.get_resource("openstack::Flavor", name=flavor_name)
+    deleted_flavor = project.get_resource("openstack::Flavor", name=flavor_name)
+    assert deleted_flavor.purged
+
+    ctx_deploy_4 = project.deploy(created_flavor)
+    assert ctx_deploy_4.status == inmanta.const.ResourceState.deployed
