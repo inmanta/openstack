@@ -172,14 +172,17 @@ class Flavor(OpenstackAdminResource):
         "ram",
         "vcpus",
         "disk",
-        "flavorid",
+        "flavor_id",
         "ephemeral",
         "swap",
         "rxtx_factor",
         "is_public",
-        "description",
         "extra_specs"
     )
+
+    @staticmethod
+    def get_extra_specs(_, obj):
+        return {key: str(val) for key, val in obj.extra_specs.items()}
 
 
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
@@ -773,7 +776,14 @@ class OpenStackHandler(CRUDHandler):
 
 @provider("openstack::Flavor", name="openstack")
 class FlavorHandler(OpenStackHandler):
-    def read_resource(self, ctx, resource):
+    def _get_flavor(self, name):
+        flavors = self._nova.flavors.list()
+        for flavor in flavors:
+            if flavor.name == name:
+                return flavor
+
+    # NOTE: Description is mentioned in the documentation, but does not seem to work currently
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         flavors = self._nova.flavors.list()
         matching_flavors = [flavor for flavor in flavors if resource.name == flavor.name]
         if not matching_flavors:
@@ -784,10 +794,11 @@ class FlavorHandler(OpenStackHandler):
             raise Exception("More than one flavor with name {}".format(resource.name))
 
         else:
-            if not resource.flavorid == "auto":
-                resource.flavorid = matching_flavors.id
-
             matching_flavor = matching_flavors[0]
+
+            if not resource.flavor_id == "auto":
+                resource.flavor_id = matching_flavor.id
+
             resource.purged = False
             resource.ram = matching_flavor.ram
             resource.vcpus = matching_flavor.vcpus
@@ -800,31 +811,45 @@ class FlavorHandler(OpenStackHandler):
                 resource.swap = 0
 
             resource.rxtx_factor = matching_flavor.rxtx_factor
-            try:
-                resource.description = matching_flavor.description
-            except AttributeError:
-                resource.description = ""
 
             resource.is_public = matching_flavor.is_public
 
-            try:
-                resource.extra_specs = matching_flavor.extra_specs
-            except AttributeError:
-                resource.extra_specs = {}
+            resource.extra_specs = self._get_flavor(resource.name).get_keys()
 
-    def create_resource(self, ctx, resource):
-        self._nova.flavors.create(
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        flavor = self._nova.flavors.create(
             resource.name,
             resource.ram,
             resource.vcpus,
             resource.disk,
-            resource.flavorid,
+            resource.flavor_id,
             resource.ephemeral,
             resource.swap,
             resource.rxtx_factor,
-            resource.is_public,
-            resource.description
+            resource.is_public
         )
+        if resource.extra_specs:
+            flavor.set_keys(resource.extra_specs)
+
+        ctx.set_created()
+
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        self._nova.flavors.delete(resource.flavorid)
+        ctx.set_purged()
+
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
+        illegal_args = [arg for arg in changes if arg not in ("extra_specs")]
+        if illegal_args:
+            raise SkipResource(f"Updating properties {illegal_args} for Flavor is not supported")
+
+        flavor = self._get_flavor(resource.name)
+        if changes.get("exrta_specs"):
+            new_extra_specs = changes["extra_specs"]
+            current_extra_specs = flavor.get_keys()
+            unset_keys = [spec for spec in current_extra_specs if spec not in new_extra_specs]
+
+            flavor.unset_keys(unset_keys)
+            flavor.set_keys(new_extra_specs)
 
 
 @provider("openstack::VirtualMachine", name="openstack")
