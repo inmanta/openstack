@@ -811,9 +811,7 @@ class FlavorHandler(OpenStackHandler):
                 resource.swap = 0
 
             resource.rxtx_factor = matching_flavor.rxtx_factor
-
             resource.is_public = matching_flavor.is_public
-
             resource.extra_specs = self._get_flavor(resource.name).get_keys()
 
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
@@ -844,7 +842,7 @@ class FlavorHandler(OpenStackHandler):
 
         flavor = self._get_flavor(resource.name)
         if changes.get("exrta_specs"):
-            new_extra_specs = changes["extra_specs"]
+            new_extra_specs = changes["extra_specs"]["desired"]
             current_extra_specs = flavor.get_keys()
             unset_keys = [spec for spec in current_extra_specs if spec not in new_extra_specs]
 

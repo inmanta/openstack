@@ -24,7 +24,7 @@ def cleanup_flavor(nova):
 def cleanup(nova):
     cleanup_flavor(nova)
     yield
-    #cleanup_flavor(nova)
+    cleanup_flavor(nova)
 
 def test_flavor(project, nova, cleanup):
     # test create
