@@ -27,7 +27,7 @@ from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources, ast
 from inmanta.agent import handler
-from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
+from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler, InvalidOperation
 from inmanta.export import dependency_manager
 from inmanta.plugins import plugin
 
@@ -839,7 +839,7 @@ class FlavorHandler(OpenStackHandler):
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
         illegal_args = [arg for arg in changes if arg not in ("extra_specs")]
         if illegal_args:
-            raise SkipResource(f"Updating properties {illegal_args} for Flavor is not supported")
+            raise InvalidOperation(f"Updating properties {illegal_args} for Flavor is not supported")
 
         flavor = self._get_flavor(resource.name)
         if changes.get("extra_specs"):
