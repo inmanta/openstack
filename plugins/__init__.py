@@ -790,8 +790,7 @@ class FlavorHandler(OpenStackHandler):
             raise ResourcePurged()
 
         elif len(matching_flavors) > 1:
-            ctx.warning("More than one flavor with name {}".format(resource.name))
-            raise Exception("More than one flavor with name {}".format(resource.name))
+            raise Exception(f"More than one flavor with name {resource.name}")
 
         else:
             matching_flavor = matching_flavors[0]
