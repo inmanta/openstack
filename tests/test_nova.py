@@ -28,7 +28,7 @@ def print_ctx(ctx):
             print(l._data["kwargs"]["traceback"])
 
 
-def test_boot_vm(project, keystone, nova, neutron):
+def test_boot_vm(project, keystone, nova, neutron, openstack):
     name = "inmanta-unit-test"
     key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
            "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "

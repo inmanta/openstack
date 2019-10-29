@@ -2133,8 +2133,8 @@ class EndpointHandler(OpenStackHandler):
         for k, v in EndpointHandler.types.items():
             if k not in endpoints:
                 self._keystone.endpoints.create(service, url=getattr(resource, v), region=resource.region, interface=k)
-                ctx.set_created()
 
             elif v in changes:
                 self._keystone.endpoints.update(endpoints[k], url=getattr(resource, v))
-                ctx.set_updated()
+
+        ctx.set_updated()
