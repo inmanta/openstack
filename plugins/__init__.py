@@ -812,7 +812,7 @@ class FlavorHandler(OpenStackHandler):
 
             resource.rxtx_factor = matching_flavor.rxtx_factor
             resource.is_public = matching_flavor.is_public
-            resource.extra_specs = self._get_flavor(resource.name).get_keys()
+            resource.extra_specs = matching_flavor.get_keys()
 
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         flavor = self._nova.flavors.create(
