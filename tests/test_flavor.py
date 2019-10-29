@@ -53,7 +53,7 @@ flavor=openstack::Flavor(
     assert created_flavor.vcpus == 4
     assert created_flavor.disk == 10
 
-    assert created_flavor.flavor_id == "auto"
+    assert created_flavor.flavor_id is None
     assert created_flavor.ephemeral == 0
     assert created_flavor.swap == 0
     assert created_flavor.rxtx_factor == 1.0

@@ -441,7 +441,7 @@ entity Flavor extends OpenStackResource:
     number ram
     number vcpus
     number disk
-    string flavor_id = null
+    string? flavor_id = null
     number ephemeral = 0
     number swap = 0
     number rxtx_factor = 1.0
