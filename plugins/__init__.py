@@ -841,7 +841,7 @@ class FlavorHandler(OpenStackHandler):
             raise SkipResource(f"Updating properties {illegal_args} for Flavor is not supported")
 
         flavor = self._get_flavor(resource.name)
-        if changes.get("exrta_specs"):
+        if changes.get("extra_specs"):
             new_extra_specs = changes["extra_specs"]["desired"]
             current_extra_specs = flavor.get_keys()
             unset_keys = [spec for spec in current_extra_specs if spec not in new_extra_specs]
