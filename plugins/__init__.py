@@ -99,6 +99,7 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
     return selected[1]["id"]
 
 FLAVORS = {}
+FIND_FLAVOR_RESULT = {}
 
 @plugin
 def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number", pinned: "bool"=False) -> "string":
@@ -110,6 +111,12 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
         :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
     """
     global FLAVORS
+    global FIND_FLAVOR_RESULT
+
+    ident = (provider.name, vcpus, ram, pinned)
+    if ident in FIND_FLAVOR_RESULT:
+        return FIND_FLAVOR_RESULT[ident]
+
     if provider.name not in FLAVORS:
         auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
                            password=provider.password, project_name=provider.tenant,
@@ -132,6 +139,7 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
         if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
                 selected = (distance, flavor)
 
+    FIND_FLAVOR_RESULT[ident] = selected[1].name
     return selected[1].name
 
 
@@ -202,7 +210,7 @@ class VirtualMachine(OpenstackResource):
 
     @staticmethod
     def get_security_groups(_, vm):
-        return [v.name for v in vm.security_groups]
+        return sorted([v.name for v in vm.security_groups])
 
 
 @resource("openstack::Network", agent="provider.name", id_attribute="name")
@@ -1549,6 +1557,8 @@ class HostPortHandler(OpenStackHandler):
             facts["ip_address_%d" % index] = ip["ip_address"]
             if index == 0:
                 facts["ip_address"] = ip["ip_address"]
+        
+        facts["mac_address"] = port["mac_address"]
 
         return facts
 
