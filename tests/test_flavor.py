@@ -105,6 +105,9 @@ flavor=openstack::Flavor(
     ctx_deploy_3 = project.deploy(created_flavor)
     assert ctx_deploy_3.status == inmanta.const.ResourceState.deployed
 
+    ctx_dryrun_3 = project.dryrun(created_flavor)
+    assert not ctx_dryrun_3.changes
+
     # test update 2: illegal update
     project.compile(f"""
 import openstack
@@ -131,6 +134,9 @@ flavor=openstack::Flavor(
     ctx_deploy_4 = project.deploy(updated_flavor)
     assert ctx_deploy_4.status == inmanta.const.ResourceState.skipped
 
+    ctx_dryrun_4 = project.dryrun(created_flavor)
+    assert not ctx_dryrun_4.changes
+
     # test delete
     project.compile(f"""
 import openstack
@@ -156,3 +162,6 @@ flavor=openstack::Flavor(
 
     ctx_deploy_4 = project.deploy(created_flavor)
     assert ctx_deploy_4.status == inmanta.const.ResourceState.deployed
+
+    ctx_dryrun_5 = project.dryrun(created_flavor)
+    assert not ctx_dryrun_5.changes
