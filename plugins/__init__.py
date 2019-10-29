@@ -796,7 +796,9 @@ class FlavorHandler(OpenStackHandler):
         else:
             matching_flavor = matching_flavors[0]
 
-            if not resource.flavor_id == "auto":
+            # If a flavor_id was manually set to anything else then null or auto,
+            # and it is changed, an error will be thrown by update_resource.
+            if not (resource.flavor_id == "auto" or not resource.flavor_id):
                 resource.flavor_id = matching_flavor.id
 
             resource.purged = False
