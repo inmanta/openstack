@@ -420,7 +420,7 @@ end
 implement VirtualMachine using userData when install_agent
 implement Host using userData when install_agent
 
-index Flavor (provider)
+index Flavor (provider, name)
 Flavor.provider [1] -- Provider.flavors [0:]
 entity Flavor extends OpenStackResource:
     string name
