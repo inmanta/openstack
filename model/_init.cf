@@ -434,7 +434,7 @@ entity Flavor extends OpenStackResource:
         :attr ephemeral: Ephemeral disk size in GB
         :attr swap: Swap space in MB
         :attr rxtx_factor: RX/TX factor
-        :attr is_public: Wether the flavor is publicly visible
+        :attr is_public: Whether the flavor is publicly visible
         :attr extra_specs: Set extra specs on a flavor. See https://docs.openstack.org/nova/rocky/admin/flavors.html
     """
     string name
