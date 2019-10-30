@@ -134,9 +134,6 @@ flavor=openstack::Flavor(
     ctx_deploy_4 = project.deploy(updated_flavor)
     assert ctx_deploy_4.status == inmanta.const.ResourceState.failed
 
-    ctx_dryrun_4 = project.dryrun(updated_flavor)
-    assert not ctx_dryrun_4.changes
-
     # test delete
     project.compile(f"""
 import openstack

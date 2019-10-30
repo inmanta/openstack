@@ -776,12 +776,6 @@ class OpenStackHandler(CRUDHandler):
 
 @provider("openstack::Flavor", name="openstack")
 class FlavorHandler(OpenStackHandler):
-    def _get_flavor(self, name):
-        flavors = self._nova.flavors.list()
-        for flavor in flavors:
-            if flavor.name == name:
-                return flavor
-
     # NOTE: Description is mentioned in the documentation, but does not seem to work currently
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         flavors = self._nova.flavors.list()
@@ -799,6 +793,8 @@ class FlavorHandler(OpenStackHandler):
             # and it is changed, an error will be thrown by update_resource.
             if not (resource.flavor_id == "auto" or not resource.flavor_id):
                 resource.flavor_id = matching_flavor.id
+
+            ctx.set("flavor_id", matching_flavor.id)
 
             resource.purged = False
             resource.ram = matching_flavor.ram
@@ -833,7 +829,7 @@ class FlavorHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        self._nova.flavors.delete(resource.flavor_id)
+        self._nova.flavors.delete(ctx.get("flavor_id"))
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
@@ -841,7 +837,7 @@ class FlavorHandler(OpenStackHandler):
         if illegal_args:
             raise InvalidOperation(f"Updating properties {illegal_args} for Flavor is not supported")
 
-        flavor = self._get_flavor(resource.name)
+        flavor = self._nova.flavors.get(ctx.get("flavor_id"))
         if changes.get("extra_specs"):
             new_extra_specs = changes["extra_specs"]["desired"]
             current_extra_specs = flavor.get_keys()
