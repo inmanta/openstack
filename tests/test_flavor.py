@@ -102,7 +102,7 @@ flavor=openstack::Flavor(
         "hw:watchdog_action": "reset"
     }
 
-    ctx_deploy_3 = project.deploy(created_flavor)
+    ctx_deploy_3 = project.deploy(updated_flavor)
     assert ctx_deploy_3.status == inmanta.const.ResourceState.deployed
 
     ctx_dryrun_3 = project.dryrun(created_flavor)
