@@ -163,5 +163,5 @@ flavor=openstack::Flavor(
     ctx_deploy_4 = project.deploy(deleted_flavor)
     assert ctx_deploy_4.status == inmanta.const.ResourceState.deployed
 
-    ctx_dryrun_5 = project.dryrun(created_flavor)
+    ctx_dryrun_5 = project.dryrun(deleted_flavor)
     assert not ctx_dryrun_5.changes
