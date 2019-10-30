@@ -105,7 +105,7 @@ flavor=openstack::Flavor(
     ctx_deploy_3 = project.deploy(updated_flavor)
     assert ctx_deploy_3.status == inmanta.const.ResourceState.deployed
 
-    ctx_dryrun_3 = project.dryrun(created_flavor)
+    ctx_dryrun_3 = project.dryrun(updated_flavor)
     assert not ctx_dryrun_3.changes
 
     # test update 2: illegal update
