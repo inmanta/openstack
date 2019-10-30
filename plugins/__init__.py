@@ -28,7 +28,7 @@ from inmanta.execute import proxy, util
 from inmanta.resources import resource, PurgeableResource, ManagedResource
 from inmanta import resources, ast
 from inmanta.agent import handler
-from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler
+from inmanta.agent.handler import provider, SkipResource, cache, ResourcePurged, CRUDHandler, InvalidOperation
 from inmanta.export import dependency_manager
 from inmanta.execute.util import Unknown
 
@@ -150,12 +150,8 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
     return selected[1].name
 
 
-class OpenstackResource(PurgeableResource, ManagedResource):
-    fields = ("project", "admin_user", "admin_password", "admin_tenant", "auth_url")
-
-    @staticmethod
-    def get_project(exporter, resource):
-        return resource.project.name
+class OpenstackAdminResource(PurgeableResource, ManagedResource):
+    fields = ("admin_user", "admin_password", "admin_tenant", "auth_url")
 
     @staticmethod
     def get_admin_user(exporter, resource):
@@ -172,6 +168,37 @@ class OpenstackResource(PurgeableResource, ManagedResource):
     @staticmethod
     def get_auth_url(exporter, resource):
         return resource.provider.connection_url
+
+
+class OpenstackResource(OpenstackAdminResource):
+    fields = ("project",)
+
+    @staticmethod
+    def get_project(exporter, resource):
+        return resource.project.name
+
+
+@resource("openstack::Flavor", agent="provider.name", id_attribute="name")
+class Flavor(OpenstackAdminResource):
+    """
+        A flavor is an available hardware configuration for a server.
+    """
+    fields = (
+        "name",
+        "ram",
+        "vcpus",
+        "disk",
+        "flavor_id",
+        "ephemeral",
+        "swap",
+        "rxtx_factor",
+        "is_public",
+        "extra_specs"
+    )
+
+    @staticmethod
+    def get_extra_specs(_, obj):
+        return {key: str(val) for key, val in obj.extra_specs.items()}
 
 
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
@@ -593,7 +620,6 @@ RESOURCE_TIMEOUT = 10
 
 
 class OpenStackHandler(CRUDHandler):
-
     @cache(timeout=CRED_TIMEOUT)
     def get_session(self, auth_url, project, admin_user, admin_password):
         auth = v3.Password(auth_url=auth_url, username=admin_user, password=admin_password, project_name=project,
@@ -763,6 +789,80 @@ class OpenStackHandler(CRUDHandler):
             ctx.warning("Multiple security groups with name %(name)s exist.", name=name, groups=sgs["security_groups"])
 
         return sgs["security_groups"][0]
+
+
+@provider("openstack::Flavor", name="openstack")
+class FlavorHandler(OpenStackHandler):
+    # NOTE: Description is mentioned in the documentation, but does not seem to work currently
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        flavors = self._nova.flavors.list()
+        matching_flavors = [flavor for flavor in flavors if resource.name == flavor.name]
+        if not matching_flavors:
+            raise ResourcePurged()
+
+        elif len(matching_flavors) > 1:
+            raise Exception(f"More than one flavor with name {resource.name}")
+
+        else:
+            matching_flavor = matching_flavors[0]
+
+            # If a flavor_id was manually set to anything else then null or auto,
+            # and it is changed, an error will be thrown by update_resource.
+            if not (resource.flavor_id == "auto" or not resource.flavor_id):
+                resource.flavor_id = matching_flavor.id
+
+            ctx.set("flavor_id", matching_flavor.id)
+
+            resource.purged = False
+            resource.ram = matching_flavor.ram
+            resource.vcpus = matching_flavor.vcpus
+            resource.disk = matching_flavor.disk
+            resource.ephemeral = matching_flavor.ephemeral
+
+            if matching_flavor.swap:
+                resource.swap = matching_flavor.swap
+            else:
+                resource.swap = 0
+
+            resource.rxtx_factor = matching_flavor.rxtx_factor
+            resource.is_public = matching_flavor.is_public
+            resource.extra_specs = matching_flavor.get_keys()
+
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        flavor = self._nova.flavors.create(
+            resource.name,
+            resource.ram,
+            resource.vcpus,
+            resource.disk,
+            resource.flavor_id,
+            resource.ephemeral,
+            resource.swap,
+            resource.rxtx_factor,
+            resource.is_public
+        )
+        if resource.extra_specs:
+            flavor.set_keys(resource.extra_specs)
+
+        ctx.set_created()
+
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        self._nova.flavors.delete(ctx.get("flavor_id"))
+        ctx.set_purged()
+
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
+        illegal_args = [arg for arg in changes if arg not in ("extra_specs")]
+        if illegal_args:
+            raise InvalidOperation(f"Updating properties {illegal_args} for Flavor is not supported")
+
+        flavor = self._nova.flavors.get(ctx.get("flavor_id"))
+        if changes.get("extra_specs"):
+            new_extra_specs = changes["extra_specs"]["desired"]
+            current_extra_specs = flavor.get_keys()
+            unset_keys = [spec for spec in current_extra_specs if spec not in new_extra_specs]
+
+            flavor.unset_keys(unset_keys)
+            flavor.set_keys(new_extra_specs)
+        ctx.set_updated()
 
 
 @provider("openstack::VirtualMachine", name="openstack")
@@ -2056,8 +2156,8 @@ class EndpointHandler(OpenStackHandler):
         for k, v in EndpointHandler.types.items():
             if k not in endpoints:
                 self._keystone.endpoints.create(service, url=getattr(resource, v), region=resource.region, interface=k)
-                ctx.set_created()
 
             elif v in changes:
                 self._keystone.endpoints.update(endpoints[k], url=getattr(resource, v))
-                ctx.set_updated()
+
+        ctx.set_updated()

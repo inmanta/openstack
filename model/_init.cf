@@ -389,6 +389,7 @@ end
 entity VirtualMachine extends OpenStackResource, VMAttributes:
     string name
 end
+
 implement VirtualMachine using providerRequire
 
 index VirtualMachine(provider, name)
@@ -433,3 +434,34 @@ end
 
 implement VirtualMachine using userData when install_agent
 implement Host using userData when install_agent
+
+index Flavor (provider, name)
+Flavor.provider [1] -- Provider.flavors [0:]
+entity Flavor extends OpenStackResource:
+    """
+        A machine flavor for OpenStack VMs
+
+        :attr name: Descriptive name of the flavor. While OpenStack does not consider the name unique, this module does.
+        :attr ram: Memory in MB for the flavor
+        :attr vcpus: Number of VCPUs for the flavor
+        :attr disk: Size of local disk in GB
+        :attr flavor_id: OpenStack unique ID. You can use the reserved value \"auto\" to have Nova generate a UUID for the flavor in cases where you cannot simply pass null.
+        :attr ephemeral: Ephemeral disk size in GB
+        :attr swap: Swap space in MB
+        :attr rxtx_factor: RX/TX factor
+        :attr is_public: Whether the flavor is publicly visible
+        :attr extra_specs: Set extra specs on a flavor. See https://docs.openstack.org/nova/rocky/admin/flavors.html
+    """
+    string name
+    number ram
+    number vcpus
+    number disk
+    string? flavor_id = null
+    number ephemeral = 0
+    number swap = 0
+    number rxtx_factor = 1.0
+    bool is_public = true
+    dict extra_specs = {}
+end
+
+implement Flavor using providerRequire

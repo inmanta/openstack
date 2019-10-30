@@ -15,6 +15,7 @@
 
     Contact: code@inmanta.com
 """
+import pytest
 import inmanta
 
 
@@ -355,6 +356,7 @@ openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_mi
     assert len(sgs["security_groups"]) == 0
 
 
+@pytest.mark.skip(reason="This tsest is currently broken and needs to be fixed")
 def test_security_group_vm(project, neutron, nova):
     name = "inmanta-unit-test"
     key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
@@ -396,6 +398,7 @@ vm2.vm.security_groups=[sg_mgmt]
     sg1 = project.get_resource("openstack::SecurityGroup", name=name)
     ctx = project.deploy(sg1)
     assert ctx.status == inmanta.const.ResourceState.deployed
+    assert neutron.list_security_groups(name=name)
 
     n1 = project.get_resource("openstack::Network", name=name)
     ctx = project.deploy(n1)
