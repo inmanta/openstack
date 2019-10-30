@@ -160,7 +160,7 @@ flavor=openstack::Flavor(
     deleted_flavor = project.get_resource("openstack::Flavor", name=flavor_name)
     assert deleted_flavor.purged
 
-    ctx_deploy_4 = project.deploy(created_flavor)
+    ctx_deploy_4 = project.deploy(deleted_flavor)
     assert ctx_deploy_4.status == inmanta.const.ResourceState.deployed
 
     ctx_dryrun_5 = project.dryrun(created_flavor)
