@@ -393,7 +393,7 @@ vm2 = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s-
 vm2.vm.security_groups=[sg_mgmt]
         """ % {"name": name, "key": key})
 
-    sg1 = project.get_resource("openstack::SecurityGroup")
+    sg1 = project.get_resource("openstack::SecurityGroup", name=name)
     ctx = project.deploy(sg1)
     assert ctx.status == inmanta.const.ResourceState.deployed
     assert neutron.list_security_groups(name=name)
