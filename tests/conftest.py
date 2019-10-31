@@ -24,6 +24,7 @@ from keystoneclient.auth.identity import v3
 from keystoneauth1 import session as keystone_session
 from keystoneauth1 import exceptions
 from keystoneclient.v3 import client as keystone_client
+from glanceclient.v2 import client as glance_client
 
 
 PREFIX = "inmanta_unit_test_"
@@ -44,15 +45,17 @@ def session():
 def nova(session):
     yield nova_client.Client("2", session=session)
 
-
 @pytest.fixture(scope="session")
 def neutron(session):
     yield neutron_client.Client("2.0", session=session)
 
-
 @pytest.fixture(scope="session")
 def keystone(session):
     yield keystone_client.Client(session=session)
+
+@pytest.fixture(scope="session")
+def glance(session):
+    yield glance_client.Client(session=session)
 
 
 class Project(object):
@@ -68,6 +71,7 @@ class Project(object):
         self._nova = None
         self._keystone = None
         self._neutron = None
+        self._glance = None
         self.project_object = None
 
     @property
@@ -95,6 +99,11 @@ class Project(object):
         if self._keystone is None:
             self._keystone = keystone_client.Client(session=self.session)
         return self._keystone
+
+    @property
+    def glance(self):
+        if self._glance is None:
+            self._glance = glance_client.Client(session=self.session)
 
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
@@ -199,6 +208,9 @@ class OpenstackTester(object):
             for network in networks:
                 if network["tenant_id"] == project_id:
                     project.neutron.delete_network(network["id"])
+
+            for image in project.glance.images.list():
+                project.glance.delete(image.id)
 
             return True
         except Exception:
