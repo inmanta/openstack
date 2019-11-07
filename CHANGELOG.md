@@ -1,3 +1,5 @@
+# 3.2.1
+- fix updates/creation for host with DHCP and fixed ip
 # 3.2.0
 - Added support for flavors
 

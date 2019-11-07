@@ -918,7 +918,7 @@ class VirtualMachineHandler(OpenStackHandler):
             if network is None:
                 raise SkipResource("Network %s not found" % port["network"])
             nic["net-id"] = network
-            if not port["dhcp"] and port["address"] is not None:
+            if port["address"] is not None:
                 nic["v4-fixed-ip"] = port["address"]
         else:
             nic["port-id"] = port_id
@@ -1529,7 +1529,7 @@ class HostPortHandler(OpenStackHandler):
             raise ResourcePurged()
 
         resource.purged = False
-        if not resource.dhcp:
+        if resource.address and len(port["fixed_ips"]) > 0:
             resource.address = port["fixed_ips"][0]["ip_address"]
 
         if len(port["fixed_ips"]) > 0:
