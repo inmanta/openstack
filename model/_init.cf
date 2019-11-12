@@ -467,9 +467,8 @@ end
 
 implement Flavor using providerRequire
 
-index Flavor (provider, name)
-Flavor.provider [1] -- Provider.flavors [0:]
-Flavor.
+index Image (provider, name)
+Image.provider [1] -- Provider.images [0:]
 
 typedef container_format as string matching self in ["ami", "ari", "aki", "bare", "ovf", "ova", "docker"]
 typedef disk_format as string matching self in ["ami", "ari", "aki", "vhd", "vhdx", "vmdk", "raw", "qcow2", "vdi", "iso", "ploop"]
@@ -483,8 +482,8 @@ entity Image extends OpenStackResource:
 
         :attr name: Name for the flavor. Inmanta treats images names as unique per provider.
         :attr uri: a link to the download location of the image.
-        :attr container_format: Must be one of [ami, ari, aki, bare, ovf, ova, docker].
-        :attr disk_format: Must be one of [ami, ari, aki, vhd, vhdx, vmdk, raw, qcow2, vdi, iso, ploop].
+        :attr container_format: Must be one of [null, ami, ari, aki, bare, ovf, ova, docker].
+        :attr disk_format: Must be one of [null, ami, ari, aki, vhd, vhdx, vmdk, raw, qcow2, vdi, iso, ploop].
         :attr image_id: uuid to identify the image. Auto set by OpenStack if not set.
         :attr visibility: Can be set to public or private. Shared and Community are currently not implemented.
         :attr protected: Wether the image can be deleted or not. Inmanta will never delete protected images.
@@ -494,10 +493,10 @@ entity Image extends OpenStackResource:
     """
     string name
     string uri
-    container_format? container_format
-    disk_format? disk_format
+    container_format? container_format = "bare"
+    disk_format? disk_format = "qcow2"
     std::uuid? image_id = null
-    visibility visibility = public
+    visibility visibility = "public"
     bool protected = false
     dict metadata = {}
     bool skip_on_deploy = true

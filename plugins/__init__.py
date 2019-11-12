@@ -201,15 +201,18 @@ class Flavor(OpenstackAdminResource):
         return {key: str(val) for key, val in obj.extra_specs.items()}
 
 @resource("openstack::Image", agent="provider.name", id_attribute="name")
-class Image(OpenstackResource):
+class Image(OpenstackAdminResource):
     fields = (
         "name",
+        "uri",
         "container_format",
         "disk_format",
         "image_id",
-        "uri",
+        "visibility",
+        "protected",
         "metadata",
-        "skip_on_deploy"
+        "skip_on_deploy",
+        "purge_on_delete"
     )
 
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
@@ -884,6 +887,7 @@ class FlavorHandler(OpenStackHandler):
 
 @provider("openstack::Image", name="openstack")
 class ImageHandler(OpenStackHandler):
+    # inmanta_metadata: metadata managed by the inmanta orchestrator
     def _get_inmanta_metadata(self, image):
         try:
             inmanta_managed_keys = image.inmanta_managed_keys.split(',')
@@ -937,7 +941,7 @@ class ImageHandler(OpenStackHandler):
     def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         # glance.images.create takes only kwargs.
         # To set something to None, the key has to be missing.
-        # Setting id to None for example generate an error.
+        # Setting id to None for example generates an error.
         kwargs = {
             "name": resource.name,
             "uri": resource.uri,
@@ -957,7 +961,7 @@ class ImageHandler(OpenStackHandler):
         kwargs["inmanta_managed_keys"] = ','.join(inmanta_managed_keys)
 
         image = self._glance.images.create(**kwargs)
-        self._glance.images.image_import(image.id, method="web-download", uri=resource.image_id)
+        self._glance.images.image_import(image.id, method="web-download", uri=resource.uri)
         if resource.skip_on_deploy:
             raise SkipResource(
                 f"Started deployment of image {resource.name}"
