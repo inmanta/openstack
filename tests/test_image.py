@@ -5,6 +5,8 @@ import pytest
 
 TEST_IMAGE_NAME = "inmanta_unit_test"
 TEST_PROJECT_NAME = "inmanta_unit_test"
+CIRROS_URI = "https://www.example.com/" # not an image but speeds up tests by a lot
+
 OPENSTACK_BASE = f"""
 import openstack
 
@@ -13,7 +15,6 @@ provider = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH
                         password=std::get_env("OS_PASSWORD"), tenant=tenant)
 
 """
-CIRROS_URI = "https://www.example.com/" # not an image but speeds up tests by a lot
 
 def get_test_image(glance):
     return [image for image in glance.images.list() if image.name == TEST_IMAGE_NAME]
@@ -38,6 +39,7 @@ image=openstack::Image(
         "test": "test"
     }}
 )
+
 """)
     created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
     assert created_image
@@ -68,6 +70,9 @@ image=openstack::Image(
     ctx_deploy_2 = project.deploy(created_image)
     assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed
 
+    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    assert len(matching_images) == 1
+
 def test_create_image_no_skip(project, glance, cleanup):
     project.compile(OPENSTACK_BASE + f"""
 image=openstack::Image(
@@ -85,3 +90,27 @@ image=openstack::Image(
 
     ctx_deploy_1 = project.deploy(created_image)
     assert ctx_deploy_1.status == inmanta.const.ResourceState.deployed
+
+    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    assert len(matching_images) == 1
+
+def test_delete(project, glance, cleanup):
+    project.compile(OPENSTACK_BASE + f"""
+image=openstack::Image(
+    provider=provider,
+    name="{TEST_IMAGE_NAME}",
+    uri="{CIRROS_URI}",
+    skip_on_deploy=false,
+    purge_on_delete=false
+)
+""")
+    created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
+
+    ctx_deploy_1 = project.deploy(created_image)
+    assert ctx_deploy_1.status == inmanta.const.ResourceState.deployed
+
+    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    assert len(matching_images) == 1
+
+    project.compile(OPENSTACK_BASE)
+    assert not project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)

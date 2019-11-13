@@ -887,6 +887,18 @@ class FlavorHandler(OpenStackHandler):
 
 @provider("openstack::Image", name="openstack")
 class ImageHandler(OpenStackHandler):
+    def _get_image(self, resource: resources.PurgeableResource):
+        if resource.image_id:
+            return self._glance.images.get(resource.image_id)
+        else:
+            matching_images = [image for image in self._glance.images.list() if resource.name == image.name]
+            if not matching_images:
+                return None
+            elif len(matching_images) > 1:
+                raise Exception(f"More than one image with name {resource.name}")
+            else:
+                return matching_images[0]
+
     # inmanta_metadata: metadata managed by the inmanta orchestrator
     def _get_inmanta_metadata(self, image):
         try:
@@ -901,19 +913,9 @@ class ImageHandler(OpenStackHandler):
         return _dict
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        # retrieve the image
-        if resource.image_id:
-            image = self._glance.images.get(resource.image_id)
-        else:
-            matching_images = [image for image in self._glance.images.list() if resource.name == image.name]
-            if not matching_images:
-                image = None
-            elif len(matching_images) > 1:
-                raise Exception(f"More than one image with name {resource.name}")
-            else:
-                image = matching_images[0]
+        image = self._get_image(resource)
 
-        # set changes
+        # check for changes
         if not image:
             raise ResourcePurged()
         else:
@@ -977,7 +979,11 @@ class ImageHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        pass
+        if resource.purge_on_delete:
+            image = self._get_image(resource)
+            self._glance.images.delete(image.id)
+
+        ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
         pass
