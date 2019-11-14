@@ -979,14 +979,40 @@ class ImageHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        if resource.purge_on_delete:
-            image = self._get_image(resource)
-            self._glance.images.delete(image.id)
+        image = self._get_image(resource)
+        self._glance.images.delete(image.id)
 
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
-        pass
+        illegal_args = [arg for arg in changes if arg not in ("visibility", "protected", "metadata", "skip_on_deploy", "purge_on_delete")]
+
+        if illegal_args:
+            raise InvalidOperation(f"Updating properties {illegal_args} for Image is not supported")
+
+        image = self._get_image(resource)
+        for key in changes:
+            if key == "visibility":
+                self._glance.images.update(image.id, visibility=changes.get(key)["desired"])
+            elif key == "protected":
+                self._glance.images.update(image.id, protected=changes.get(key)["desired"])
+            elif key == "metadata":
+                current = changes.get(key)["current"]
+                desired = changes.get(key)["desired"]
+
+                remove_props = []
+                for key in current:
+                    if key not in desired:
+                        remove_props.append(key)
+
+                self._glance.images.update(
+                    image.id,
+                    remove_props=remove_props,
+                    inmanta_managed_keys=','.join(desired.keys()),
+                    **desired
+                )
+
+        ctx.set_updated()
 
 
 @provider("openstack::VirtualMachine", name="openstack")

@@ -21,6 +21,8 @@ def get_test_image(glance):
 
 def cleanup_image(glance):
     for image in get_test_image(glance):
+        if image.protected:
+            glance.images.update(image.id, protected=False)
         glance.images.delete(image.id)
 
 @pytest.fixture()
@@ -28,6 +30,7 @@ def cleanup(glance):
     cleanup_image(glance)
     yield
     cleanup_image(glance)
+
 
 def test_create_image(project, glance, cleanup):
     project.compile(OPENSTACK_BASE + f"""
@@ -73,6 +76,7 @@ image=openstack::Image(
     matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
     assert len(matching_images) == 1
 
+
 def test_create_image_no_skip(project, glance, cleanup):
     project.compile(OPENSTACK_BASE + f"""
 image=openstack::Image(
@@ -94,6 +98,7 @@ image=openstack::Image(
     matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
     assert len(matching_images) == 1
 
+
 def test_delete(project, glance, cleanup):
     project.compile(OPENSTACK_BASE + f"""
 image=openstack::Image(
@@ -101,7 +106,7 @@ image=openstack::Image(
     name="{TEST_IMAGE_NAME}",
     uri="{CIRROS_URI}",
     skip_on_deploy=false,
-    purge_on_delete=false
+    purge_on_delete=true
 )
 """)
     created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
@@ -112,5 +117,97 @@ image=openstack::Image(
     matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
     assert len(matching_images) == 1
 
-    project.compile(OPENSTACK_BASE)
-    assert not project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
+    project.compile(OPENSTACK_BASE + f"""
+image=openstack::Image(
+    provider=provider,
+    name="{TEST_IMAGE_NAME}",
+    uri="{CIRROS_URI}",
+    skip_on_deploy=false,
+    purge_on_delete=true,
+    purged=true
+)
+""")
+
+    deleted_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
+    assert deleted_image.purged
+
+    ctx_deploy_2 = project.deploy(deleted_image)
+    assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed
+
+    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    assert not matching_images
+
+
+def test_update(project, glance, cleanup):
+    project.compile(OPENSTACK_BASE + f"""
+image=openstack::Image(
+    provider=provider,
+    name="{TEST_IMAGE_NAME}",
+    uri="{CIRROS_URI}",
+    protected=true,
+    skip_on_deploy=false,
+    purge_on_delete=false,
+    metadata = {{
+        "test1": "test",
+        "test2": "test",
+        "test3": "test"
+    }}
+)
+""")
+    created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
+
+    assert created_image.visibility == "public"
+    assert created_image.protected
+    assert created_image.metadata == {
+        "test1": "test",
+        "test2": "test",
+        "test3": "test"
+    }
+
+    ctx_deploy_1 = project.deploy(created_image)
+    assert ctx_deploy_1.status == inmanta.const.ResourceState.deployed
+
+    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    assert len(matching_images) == 1
+
+    glance.images.update(matching_images[0].id, non_inmanta_key = "test")
+
+    project.compile(OPENSTACK_BASE + f"""
+image=openstack::Image(
+    provider=provider,
+    name="{TEST_IMAGE_NAME}",
+    uri="{CIRROS_URI}",
+    visibility="private",
+    protected=false,
+    skip_on_deploy=false,
+    purge_on_delete=false,
+    metadata = {{
+        "test1": "test",
+        "test2": "not_test"
+    }}
+)
+""")
+
+    updated_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
+
+    assert updated_image.visibility == "private"
+    assert not updated_image.protected
+    assert updated_image.metadata == {
+        "test1": "test",
+        "test2": "not_test",
+    }
+
+    ctx_deploy_2 = project.deploy(updated_image)
+    assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed
+
+    images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    assert len(matching_images) == 1
+
+    image = images[0]
+
+    assert image.visibility == "private"
+    assert not image.protected
+    assert image.non_inmanta_key == "test"
+    assert image.test1 == "test"
+    assert image.test2 == "not_test"
+    assert not hasattr(image, "test3")
