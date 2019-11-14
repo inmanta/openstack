@@ -467,7 +467,7 @@ end
 
 implement Flavor using providerRequire
 
-index Image (provider, name)
+index Image(provider, name)
 Image.provider [1] -- Provider.images [0:]
 
 typedef container_format as string matching self in ["ami", "ari", "aki", "bare", "ovf", "ova", "docker"]
