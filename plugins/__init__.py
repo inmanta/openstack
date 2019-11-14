@@ -980,7 +980,7 @@ class ImageHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        image = self._get_image(resource)
+        image = self._glance.images.get(ctx.get("image_id"))
         self._glance.images.delete(image.id)
 
         ctx.set_purged()
@@ -993,7 +993,7 @@ class ImageHandler(OpenStackHandler):
         if illegal_args:
             raise InvalidOperation(f"Updating properties {illegal_args} for Image is not supported")
 
-        image = self._get_image(resource)
+        image = self._glance.images.get(ctx.get("image_id"))
         for key in changes:
             if key == "visibility":
                 self._glance.images.update(image.id, visibility=changes.get(key)["desired"])
