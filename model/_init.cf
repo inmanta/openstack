@@ -485,7 +485,7 @@ entity Image extends OpenStackResource:
         :attr container_format: Must be one of [null, ami, ari, aki, bare, ovf, ova, docker].
         :attr disk_format: Must be one of [null, ami, ari, aki, vhd, vhdx, vmdk, raw, qcow2, vdi, iso, ploop].
         :attr image_id: uuid to identify the image. Auto set by OpenStack if not set.
-        :attr visibility: Can be set to public or private. Shared and Community are currently not implemented.
+        :attr visibility: Wether the image is visible across all projects. Can either be public or private. Shared and community are currently not implemented.
         :attr protected: Whether the image can be deleted or not. Inmanta will never delete protected images.
         :attr metadata: Various metadata passed as a dict.
         :attr skip_on_deploy: When set, inmanta will not wait for the image to be deployed and mark it as skipped.
