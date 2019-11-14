@@ -994,28 +994,37 @@ class ImageHandler(OpenStackHandler):
             raise InvalidOperation(f"Updating properties {illegal_args} for Image is not supported")
 
         image = self._glance.images.get(ctx.get("image_id"))
+        kwargs = {}
+        # Properties that are no longer used are not set to none,
+        # instead they are passed as a list
+        remove_props = []
+        inmanta_managed_keys = ""
         for key in changes:
             if key == "visibility":
-                self._glance.images.update(image.id, visibility=changes.get(key)["desired"])
+                kwargs["visibility"] = changes.get(key)["desired"]
             elif key == "protected":
-                self._glance.images.update(image.id, protected=changes.get(key)["desired"])
+                kwargs["protected"] = changes.get(key)["desired"]
             elif key == "metadata":
                 current = changes.get(key)["current"]
                 desired = changes.get(key)["desired"]
 
-                # Properties that are no longer used are not set to none,
-                # instead they are passed as a list
-                remove_props = []
                 for key in current:
                     if key not in desired:
                         remove_props.append(key)
 
-                self._glance.images.update(
-                    image.id,
-                    remove_props=remove_props,
-                    inmanta_managed_keys=','.join(desired.keys()),
-                    **desired
-                )
+                for key, value in desired.items():
+                    kwargs[key] = value
+
+                inmanta_managed_keys=','.join(desired.keys())
+
+        if inmanta_managed_keys:
+            kwargs["inmanta_managed_keys"] = inmanta_managed_keys
+
+        if remove_props:
+            kwargs["remove_props"] = remove_props
+
+        
+        self._glance.images.update(image.id, **kwargs)
 
         ctx.set_updated()
 
