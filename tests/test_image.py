@@ -170,6 +170,7 @@ image=openstack::Image(
     matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
     assert len(matching_images) == 1
 
+    # test that non inmanta keys don't get deleted
     glance.images.update(matching_images[0].id, non_inmanta_key = "test")
 
     project.compile(OPENSTACK_BASE + f"""
@@ -192,6 +193,8 @@ image=openstack::Image(
 
     assert updated_image.visibility == "private"
     assert not updated_image.protected
+
+    # test1 remains the same, test2 is updated, 3 is deleted
     assert updated_image.metadata == {
         "test1": "test",
         "test2": "not_test",

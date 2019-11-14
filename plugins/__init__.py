@@ -899,18 +899,19 @@ class ImageHandler(OpenStackHandler):
             else:
                 return matching_images[0]
 
-    # inmanta_metadata: metadata managed by the inmanta orchestrator
+    # keep track of whcih keys we had set before
+    # so we can reconstruct the metadata dictionary correctly
     def _get_inmanta_metadata(self, image):
         try:
             inmanta_managed_keys = image.inmanta_managed_keys.split(',')
         except AttributeError:
             return {}
 
-        _dict = {}
+        metadata_dict = {}
         for key in inmanta_managed_keys:
-            _dict[key] = image.get(key)
+            metadata_dict[key] = image.get(key)
 
-        return _dict
+        return metadata_dict
 
     def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
         image = self._get_image(resource)
@@ -985,7 +986,9 @@ class ImageHandler(OpenStackHandler):
         ctx.set_purged()
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
-        illegal_args = [arg for arg in changes if arg not in ("visibility", "protected", "metadata", "skip_on_deploy", "purge_on_delete")]
+        # other parameters should never be updated
+        legal_args = ("visibility", "protected", "metadata", "skip_on_deploy", "purge_on_delete")
+        illegal_args = [arg for arg in changes if arg not in legal_args]
 
         if illegal_args:
             raise InvalidOperation(f"Updating properties {illegal_args} for Image is not supported")
@@ -1000,6 +1003,8 @@ class ImageHandler(OpenStackHandler):
                 current = changes.get(key)["current"]
                 desired = changes.get(key)["desired"]
 
+                # Properties that are no longer used are not set to none,
+                # instead they are passed as a list
                 remove_props = []
                 for key in current:
                     if key not in desired:
