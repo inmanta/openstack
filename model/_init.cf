@@ -480,7 +480,7 @@ entity Image extends OpenStackResource:
     """
         A machine image for OpenStack VMs
 
-        :attr name: Name for the flavor. Inmanta treats images names as unique per provider.
+        :attr name: Name for the flavor. Inmanta treats image names as unique per provider.
         :attr uri: a link to the download location of the image.
         :attr container_format: Must be one of [null, ami, ari, aki, bare, ovf, ova, docker].
         :attr disk_format: Must be one of [null, ami, ari, aki, vhd, vhdx, vmdk, raw, qcow2, vdi, iso, ploop].
