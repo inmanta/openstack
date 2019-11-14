@@ -980,8 +980,7 @@ class ImageHandler(OpenStackHandler):
         ctx.set_created()
 
     def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
-        image = self._glance.images.get(ctx.get("image_id"))
-        self._glance.images.delete(image.id)
+        self._glance.images.delete(ctx.get("image_id"))
 
         ctx.set_purged()
 
@@ -993,7 +992,6 @@ class ImageHandler(OpenStackHandler):
         if illegal_args:
             raise InvalidOperation(f"Updating properties {illegal_args} for Image is not supported")
 
-        image = self._glance.images.get(ctx.get("image_id"))
         kwargs = {}
         # Properties that are no longer used are not set to none,
         # instead they are passed as a list
@@ -1023,9 +1021,7 @@ class ImageHandler(OpenStackHandler):
         if remove_props:
             kwargs["remove_props"] = remove_props
 
-        
-        self._glance.images.update(image.id, **kwargs)
-
+        self._glance.images.update(ctx.get("image_id"), **kwargs)
         ctx.set_updated()
 
 
