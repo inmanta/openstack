@@ -99,7 +99,7 @@ image=openstack::Image(
     assert len(matching_images) == 1
 
 
-def test_delete(project, glance, cleanup):
+def test_delete_image(project, glance, cleanup):
     project.compile(OPENSTACK_BASE + f"""
 image=openstack::Image(
     provider=provider,
@@ -138,7 +138,7 @@ image=openstack::Image(
     assert not matching_images
 
 
-def test_update(project, glance, cleanup):
+def test_update_image(project, glance, cleanup):
     project.compile(OPENSTACK_BASE + f"""
 image=openstack::Image(
     provider=provider,
