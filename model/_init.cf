@@ -22,6 +22,11 @@ import platform
 import ssh
 
 entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
+    """ Base class for all openstack resources
+
+        :param send_event: Forced to default true. This means that all resources that subscribe to this 
+                           resource will run their process events / reload.
+    """
     bool send_event=true
 end
 
