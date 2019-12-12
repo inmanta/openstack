@@ -200,6 +200,20 @@ class Flavor(OpenstackAdminResource):
     def get_extra_specs(_, obj):
         return {key: str(val) for key, val in obj.extra_specs.items()}
 
+@resource("openstack::Image", agent="provider.name", id_attribute="name")
+class Image(OpenstackAdminResource):
+    fields = (
+        "name",
+        "uri",
+        "container_format",
+        "disk_format",
+        "image_id",
+        "visibility",
+        "protected",
+        "metadata",
+        "skip_on_deploy",
+        "purge_on_delete"
+    )
 
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
 class VirtualMachine(OpenstackResource):
@@ -639,17 +653,23 @@ class OpenStackHandler(CRUDHandler):
     def get_keystone_client(self, auth_url, project, admin_user, admin_password):
         return keystone_client.Client(session=self.get_session(auth_url, project, admin_user, admin_password))
 
+    @cache(timeout=CRED_TIMEOUT)
+    def get_glance_client(self, auth_url, project, admin_user, admin_password):
+        return glance_client.Client("2", session=self.get_session(auth_url, project, admin_user, admin_password))
+
     def pre(self, ctx, resource):
         project = resource.admin_tenant
         self._nova = self.get_nova_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
         self._neutron = self.get_neutron_client(resource.auth_url, project, resource.admin_user,
                                                 resource.admin_password)
         self._keystone = self.get_keystone_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
+        self._glance = self.get_glance_client(resource.auth_url, project, resource.admin_user, resource.admin_password)
 
     def post(self, ctx, resource):
         self._nova = None
         self._neutron = None
         self._keystone = None
+        self._glance = None
 
     def get_project_id(self, resource, name):
         """
@@ -862,6 +882,146 @@ class FlavorHandler(OpenStackHandler):
 
             flavor.unset_keys(unset_keys)
             flavor.set_keys(new_extra_specs)
+        ctx.set_updated()
+
+
+@provider("openstack::Image", name="openstack")
+class ImageHandler(OpenStackHandler):
+    def _get_image(self, resource: resources.PurgeableResource):
+        if resource.image_id:
+            return self._glance.images.get(resource.image_id)
+        else:
+            matching_images = [image for image in self._glance.images.list() if resource.name == image.name]
+            if not matching_images:
+                return None
+            elif len(matching_images) > 1:
+                raise Exception(f"More than one image with name {resource.name}")
+            else:
+                return matching_images[0]
+
+    # keep track of whcih keys we had set before
+    # so we can reconstruct the metadata dictionary correctly
+    def _get_inmanta_metadata(self, image):
+        try:
+            inmanta_managed_keys = image.inmanta_managed_keys.split(',')
+        except AttributeError:
+            return {}
+
+        metadata_dict = {}
+        for key in inmanta_managed_keys:
+            metadata_dict[key] = image.get(key)
+
+        return metadata_dict
+
+    def read_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        image = self._get_image(resource)
+
+        # check for changes
+        if not image:
+            raise ResourcePurged()
+        else:
+            ctx.set("image_id", image.id)
+
+            resource.purged = False
+
+            # Id is always the same, but name could technically change if the id is set.
+            resource.name = image.name
+            resource.image_id = image.id
+
+            # uri is not an official openstack attribute
+            try:
+                resource.uri = image.uri
+            except AttributeError:
+                ctx.warning(f"Could not validate uri attribute for image {resource.name}: attribute missing from OpenStack object.")
+
+            resource.container_format = image.container_format
+            resource.disk_format = image.disk_format
+            resource.visibility = image.visibility
+            resource.protected = image.protected
+            resource.metadata = self._get_inmanta_metadata(image)
+            # resource.skip_on_deploy doesn't matter for existing resources
+
+    def create_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        # glance.images.create takes only kwargs.
+        # To set something to None, the key has to be missing.
+        # Setting id to None for example generates an error.
+        kwargs = {
+            "name": resource.name,
+            "uri": resource.uri,
+            "container_format": resource.container_format,
+            "disk_format": resource.disk_format,
+            "visibility": resource.visibility,
+            "protected": resource.protected,
+        }
+        if resource.image_id:
+            kwargs["id"] = resource.image_id
+
+        inmanta_managed_keys = []
+        for key, value in resource.metadata.items():
+            inmanta_managed_keys.append(key)
+            kwargs[key] = value
+
+        kwargs["inmanta_managed_keys"] = ','.join(inmanta_managed_keys)
+
+        image = self._glance.images.create(**kwargs)
+        self._glance.images.image_import(image.id, method="web-download", uri=resource.uri)
+        if resource.skip_on_deploy:
+            raise SkipResource(
+                f"Started deployment of image {resource.name}"
+                ", but not waiting for it to deploy, because skip_on_deploy is set"
+            )
+        else:
+            while True:
+                image = self._glance.images.get(image.id)
+                if image.status == "active":
+                    break
+                time.sleep(0.1)
+
+        ctx.set_created()
+
+    def delete_resource(self, ctx: handler.HandlerContext, resource: resources.PurgeableResource):
+        self._glance.images.delete(ctx.get("image_id"))
+
+        ctx.set_purged()
+
+    def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource):
+        # other parameters should never be updated
+        legal_args = ("visibility", "protected", "metadata", "skip_on_deploy", "purge_on_delete")
+        illegal_args = [arg for arg in changes if arg not in legal_args]
+
+        if illegal_args:
+            raise InvalidOperation(f"Updating properties {illegal_args} for Image is not supported")
+
+        kwargs = {}
+        # Properties that are no longer used are not set to none,
+        # instead they are passed as a list
+        remove_props = []
+        inmanta_managed_keys = ""
+        for key in changes:
+            if key == "visibility":
+                kwargs["visibility"] = changes.get(key)["desired"]
+            elif key == "protected":
+                kwargs["protected"] = changes.get(key)["desired"]
+            elif key == "metadata":
+                current = changes.get(key)["current"]
+                desired = changes.get(key)["desired"]
+
+                for key in current:
+                    if key not in desired:
+                        remove_props.append(key)
+
+                for key, value in desired.items():
+                    kwargs[key] = value
+
+                inmanta_managed_keys=','.join(desired.keys())
+
+        if inmanta_managed_keys:
+            kwargs["inmanta_managed_keys"] = inmanta_managed_keys
+
+        if remove_props:
+            kwargs["remove_props"] = remove_props
+
+        self._glance.images.update(ctx.get("image_id"), **kwargs)
         ctx.set_updated()
 
 

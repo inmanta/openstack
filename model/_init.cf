@@ -20,6 +20,7 @@ import ip::services
 import net
 import platform
 import ssh
+import std
 
 entity OpenStackResource extends std::PurgeableResource, std::ManagedResource:
 end
@@ -465,3 +466,41 @@ entity Flavor extends OpenStackResource:
 end
 
 implement Flavor using providerRequire
+
+index Image(provider, name)
+Image.provider [1] -- Provider.images [0:]
+
+typedef container_format as string matching self in ["ami", "ari", "aki", "bare", "ovf", "ova", "docker"]
+typedef disk_format as string matching self in ["ami", "ari", "aki", "vhd", "vhdx", "vmdk", "raw", "qcow2", "vdi", "iso", "ploop"]
+# TODO: add support for "shared" and "community"
+# see: https://wiki.openstack.org/wiki/Glance-v2-community-image-visibility-design
+typedef visibility as string matching self in ["public", "private"]
+
+entity Image extends OpenStackResource:
+    """
+        A machine image for OpenStack VMs
+
+        :attr name: Name for the flavor. Inmanta treats image names as unique per provider.
+        :attr uri: a link to the download location of the image.
+        :attr container_format: Must be one of [null, ami, ari, aki, bare, ovf, ova, docker].
+        :attr disk_format: Must be one of [null, ami, ari, aki, vhd, vhdx, vmdk, raw, qcow2, vdi, iso, ploop].
+        :attr image_id: uuid to identify the image. Auto set by OpenStack if not set.
+        :attr visibility: Whether the image is visible across all projects. Can either be public or private. Shared and community are currently not implemented.
+        :attr protected: Whether the image can be deleted or not. Inmanta will never delete protected images.
+        :attr metadata: Various metadata passed as a dict.
+        :attr skip_on_deploy: When set, inmanta will not wait for the image to be deployed and mark it as skipped.
+        :attr purge_on_delete: When set to true, the image will be removed when no longer present in the model.
+    """
+    string name
+    string uri
+    container_format? container_format = "bare"
+    disk_format? disk_format = "qcow2"
+    std::uuid? image_id = null
+    visibility visibility = "public"
+    bool protected = false
+    dict metadata = {}
+    bool skip_on_deploy = true
+    bool purge_on_delete = false
+end
+
+implement Image using providerRequire
