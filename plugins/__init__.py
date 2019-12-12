@@ -60,6 +60,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 IMAGES = {}
+FIND_IMAGE_RESULT = {}
 
 @plugin
 def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=None) -> "string":
@@ -74,6 +75,12 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
         :param os: The operating system and version (using os_distro and os_version metadata)
         :param name: An optional string that the image name should contain
     """
+    global FIND_IMAGE_RESULT
+
+    ident = (provider.name, os.name.lower(), str(os.version).lower())
+    if ident in FIND_IMAGE_RESULT:
+        return FIND_IMAGE_RESULT[ident]
+
     try:
         global IMAGES
         if provider.name not in IMAGES:
@@ -84,6 +91,9 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
             client = glance_client.Client("2", session=sess)
 
             IMAGES[provider.name] = list(client.images.list())
+    except keystoneauth1.exceptions.http.Unauthorized:
+        # Make sure that the model compiles when the tenant has not been created yet
+        return Unknown(None)
     except keystoneauth1.exceptions.connection.ConnectFailure:
         # Make sure that the model compiles when the openstack instance is down
         return Unknown(None)
@@ -102,7 +112,9 @@ def find_image(provider: "openstack::Provider", os: "std::OS", name: "string"=No
     if selected[1] is None:
         raise Exception("No image found for os %s and version %s" % (os.name, os.version))
 
-    return selected[1]["id"]
+    result = selected[1]["id"]
+    FIND_IMAGE_RESULT[ident] = result
+    return result
 
 
 FLAVORS = {}
@@ -125,13 +137,20 @@ def find_flavor(provider: "openstack::Provider", vcpus: "number", ram: "number",
         return FIND_FLAVOR_RESULT[ident]
 
     if provider.name not in FLAVORS:
-        auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
+        try:
+            auth = v3.Password(auth_url=provider.connection_url, username=provider.username,
                            password=provider.password, project_name=provider.tenant,
                            user_domain_id="default", project_domain_id="default")
-        sess = session.Session(auth=auth)
-        client = nova_client.Client("2.1", session=sess)
+            sess = session.Session(auth=auth)
+            client = nova_client.Client("2.1", session=sess)
 
-        FLAVORS[provider.name] = list(client.flavors.list())
+            FLAVORS[provider.name] = list(client.flavors.list())
+        except keystoneauth1.exceptions.http.Unauthorized:
+            # Make sure that the model compiles when the tenant has not been created yet
+            return Unknown(None)
+        except keystoneauth1.exceptions.connection.ConnectFailure:
+            # Make sure that the model compiles when the openstack instance is down
+            return Unknown(None)
 
     selected = (1000000, None)
     for flavor in FLAVORS[provider.name]:
@@ -1399,24 +1418,36 @@ class RouterHandler(OpenStackHandler):
 
     def update_resource(self, ctx: handler.HandlerContext, changes: dict, resource: resources.PurgeableResource) -> None:
         router_id = ctx.get("neutron")["id"]
+        updated = False
+
         if "name" in changes:
             self._neutron.update_router(router_id, {"router": {"name": resource.name}})
-            ctx.set_updated()
+            if not updated:
+                ctx.set_updated()
+                updated = True
 
         if "subnets" in changes:
             self._update_subnets(router_id, changes["subnets"]["current"], changes["subnets"]["desired"])
             ctx.info("Modified subnets of router with id %(id)s", id=router_id)
-            ctx.set_updated()
+            if not updated:
+                ctx.set_updated()
+                updated = True
 
         if "gateway" in changes:
             self._set_gateway(router_id, resource.gateway)
             ctx.info("Modified gateway of router with id %(id)s", id=router_id)
-            ctx.set_updated()
+            if not updated:
+                ctx.set_updated()
+                updated = True
 
         if "routes" in changes:
-            ctx.set_updated()
             self._neutron.update_router(router_id, {"router": {"routes": [{"nexthop": n, "destination": d}
                                                                           for d, n in resource.routes.items()]}})
+            if not updated:
+                ctx.set_updated()
+                updated = True
+
+
 
     def facts(self, ctx, resource: Router) -> dict:
         routers = self._neutron.list_routers(name=resource.name)
@@ -1660,7 +1691,7 @@ class HostPortHandler(OpenStackHandler):
                 if vm_state == "active":
                     return vm
 
-            ctx.info("VM for port is not in active state. Waiting and retrying in 5 seconds.")
+            ctx.info("VM for port is not in active state, but %(state)s. Waiting and retrying in 5 seconds.", state=vm_state)
             tries += 1
             time.sleep(resource.wait)
 
