@@ -2,7 +2,8 @@
 
 1. vm.cf: make a virtual machine in an existing tenant, on an existing subnet, with a given image
 2. vm_and_floating_ip.cf: same as above, but with floating ip
-3. tenant.cf: setup a new tenant, with default network, subnet and upstream router, requires admin access
+3. find_image_and_flavor.cf: discover image id and flavor name from the model
+4. tenant.cf: setup a new tenant, with default network, subnet and upstream router, requires admin access
 
 
 ## Running examples
