@@ -28,7 +28,15 @@ uplink_network = openstack::Network(
     managed=false
 )
 
-OpenstackTenant(name="testuser", email="testuser@example.com", subnet="10.0.6.0/24", admin_provider=admin, uplink_network=uplink_network, purged=true)
+#make the tenant
+OpenstackTenant(
+    name="testuser",
+    email="testuser@example.com",
+    subnet="10.0.6.0/24",
+    admin_provider=admin,
+    uplink_network=uplink_network,
+    purged=false
+)
 
 entity OpenstackTenant:
     string name
