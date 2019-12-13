@@ -1,0 +1,126 @@
+"""
+This example creates tenants on openstack for indivual users: every user gets its own tenant with a default network and upstream router
+"""
+import ip
+import openstack
+
+uplink_network_name = "public" # Name of the network where the floating ip needs to end up in
+
+# admin user connection
+admin = openstack::Provider(
+    name="iaas_openstack",
+    connection_url=std::get_env("OS_AUTH_URL"),
+    username=std::get_env("OS_USERNAME"),
+    password=std::get_env("OS_PASSWORD"),
+    tenant=std::get_env("OS_PROJECT_NAME")
+)
+
+# admin project
+admin_project = openstack::Project(
+    name=admin.tenant,
+    provider=admin,
+    managed=false)
+
+uplink_network = openstack::Network(
+    provider=admin,
+    project=admin_project,
+    name=uplink_network_name,
+    managed=false
+)
+
+OpenstackTenant(name="testuser", email="testuser@example.com", subnet="10.0.6.0/24", admin_provider=admin, uplink_network=uplink_network, purged=true)
+
+entity OpenstackTenant:
+    string name
+    string email
+    string dns_server = "192.168.2.1"
+    ip::cidr subnet
+
+    # delete the tenant
+    bool purged = false
+end
+
+index OpenstackTenant(admin_provider, name)
+
+implement OpenstackTenant using add_tenant
+
+OpenstackTenant.admin_provider [1] -- openstack::Provider
+OpenstackTenant.uplink_network [1] -- openstack::Network
+
+
+implementation add_tenant for OpenstackTenant:
+    # a project for the user, with the same name as the user
+    project = openstack::Project(name=name,
+                                 description="Openstack tenant used for {{name}}",
+                                 provider=admin_provider,
+                                 purged=purged,
+                                 purge_on_delete=false)
+
+    # a user
+    user = openstack::User(name=name,
+                            email=email,
+                            password="",  # Set no password, manage passwords by other means
+                            provider=admin_provider,
+                            purged=purged,
+                            purge_on_delete=false)
+
+    # make the user a member of the
+    member_role = openstack::Role(role="member",
+                                  provider=admin_provider,
+                                  project=project,
+                                  user=user,
+                                  purged=purged,
+                                  purge_on_delete=false)
+
+    # default network
+    network = openstack::Network(name=name,
+                                provider=admin_provider,
+                                project=project,
+                                purged=purged,
+                                purge_on_delete=false)
+    # default subnet with given range
+    subnet = openstack::Subnet(network_address=self.subnet,
+                                       dhcp=true,
+                                       name=name,
+                                       allocation_start=ip::ipindex(self.subnet,10),
+                                       allocation_end=ip::ipindex(self.subnet,-10),
+                                       dns_servers=[dns_server],
+                                       provider=admin_provider,
+                                       project=project,
+                                       network=network,
+                                       purged=purged,
+                                       purge_on_delete=false)
+    # upstream router
+    router = openstack::Router(name=name,
+                      provider=admin_provider,
+                      project=project,
+                      subnets=[subnet],
+                      ext_gateway=uplink_network,
+                      provides=self.provides,
+                      requires=admin_role,
+                      purged=purged,
+                      purge_on_delete=false)
+    # Make admin user admin on the project
+    admin_user = openstack::User(name="admin",
+                                 email="_placeholder_", # not managed, can be any value
+                                 password="",
+                                 managed = false,
+                                 provider=admin_provider)
+
+    admin_role = openstack::Role(role="admin",
+                    provider=admin_provider,
+                    project=project,
+                    user=admin_user,
+                    purge_on_delete=false,
+                    purged=false, # don't delete, this would lock out the admin user
+                    provides=self.provides)
+    
+    #sequence delete
+    if self.purged:
+        subnet.requires = router
+        network.requires = subnet
+        project.requires = [admin_role, network, user]
+        user.requires = member_role
+    end
+
+end
