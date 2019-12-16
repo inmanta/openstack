@@ -20,10 +20,11 @@ These examples require you to have access to an openstack instance.
 | OS_PROJECT_NAME   | The name of the project to deploy the VM to|
 
 
-2. Create a project to run the example from
+2. Create a project to run the example from, using [cookie cutter](https://github.com/cookiecutter/cookiecutter)
 
 ```bash
-cookiecutter gh:inmanta/inmanta-project-template
+> pip install --user cookiecutter
+> cookiecutter gh:inmanta/inmanta-project-template
 
 project_name [project]: openstacktest
 project_description []: 
@@ -38,7 +39,7 @@ Select install_mode:
 3 - prerelease
 Choose from 1, 2, 3 (1, 2, 3) [1]: 1
 
-cd openstacktest
+> cd openstacktest
 ```
 
 3. Copy the content of the example to the project's `main.cf`

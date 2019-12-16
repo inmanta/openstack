@@ -123,7 +123,10 @@ implementation add_tenant for OpenstackTenant:
                     purged=false, # don't delete, this would lock out the admin user
                     provides=self.provides)
     
-    #sequence delete
+    # sequence delete
+    # With normal, none-purged, resource, the ordering is done by the dependency handler in 
+    # (see plugins/__init__.py, def openstack_dependencies)
+    # For purged dependencies, we have to determine the correct order ourselves
     if self.purged:
         subnet.requires = router
         network.requires = subnet
