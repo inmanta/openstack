@@ -1,5 +1,5 @@
 """
-This example creates tenants on openstack for indivual users: every user gets its own tenant with a default network and upstream router
+This example creates tenants on openstack for individual users: every user gets its own tenant with a default network and upstream router
 """
 import ip
 import openstack
@@ -72,7 +72,7 @@ implementation add_tenant for OpenstackTenant:
                             purged=purged,
                             purge_on_delete=false)
 
-    # make the user a member of the
+    # make the user a member of the new project
     member_role = openstack::Role(role="member",
                                   provider=admin_provider,
                                   project=project,
