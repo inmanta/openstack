@@ -1,14 +1,14 @@
-# 3.2.2
+# 3.3.1
 - added examples folder
 
-# 3.2.1
-- fix updates/creation for host with DHCP and fixed ip
+# 3.3.0
 - added improved caching for find_image
 - added an OpenStack image resource, for add OS images to OpenStack
 - Changed send_event default value to true from false
 
 # 3.2.0
 - Added support for flavors
+- fix updates/creation for host with DHCP and fixed ip
 
 # 3.1.1
 - added cache to improve find_flavor performance
