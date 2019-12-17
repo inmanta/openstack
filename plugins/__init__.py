@@ -561,28 +561,36 @@ def openstack_dependencies(config_model, resource_model):
 
     for _, res in resource_model.items():
         if res.id.entity_type == "openstack::Project":
-            projects[res.name] = res
+            if not res.purged:
+                projects[res.name] = res
 
         elif res.id.entity_type == "openstack::Network":
-            networks[res.name] = res
+            if not res.purged:
+                networks[res.name] = res
 
         elif res.id.entity_type == "openstack::Router":
-            routers[res.name] = res
+            if not res.purged:
+                routers[res.name] = res
 
         elif res.id.entity_type == "openstack::Subnet":
-            subnets[res.name] = res
+            if not res.purged:
+                subnets[res.name] = res
 
         elif res.id.entity_type == "openstack::VirtualMachine":
-            vms[res.name] = res
+            if not res.purged:
+                vms[res.name] = res
 
         elif res.id.entity_type == "openstack::HostPort":
-            ports[res.name] = res
+            if not res.purged:
+                ports[res.name] = res
 
         elif res.id.entity_type == "openstack::FloatingIP":
-            fips[res.name] = res
+            if not res.purged:
+                fips[res.name] = res
 
         elif res.id.entity_type == "openstack::SecurityGroup":
-            sgs[res.name] = res
+            if not res.purged:
+                sgs[res.name] = res
 
     # they require the tenant to exist
     for network in networks.values():
@@ -2121,22 +2129,26 @@ def keystone_dependencies(config_model, resource_model):
     roles = []
     for _, res in resource_model.items():
         if res.id.entity_type == "openstack::Project":
-            projects[res.name] = res
+            if not res.purged:
+                projects[res.name] = res
 
         elif res.id.entity_type == "openstack::User":
-            users[res.name] = res
+            if not res.purged:
+                users[res.name] = res
 
         elif res.id.entity_type == "openstack::Role":
-            roles.append(res)
+            if not res.purged:
+                roles.append(res)
 
     for role in roles:
-        if role.project not in projects:
-            raise Exception("The project %s of role %s is not defined in the model." % (role.project, role.role_id))
+        if role.project in projects:
+            # can be absent when doing purges
+            role.requires.add(projects[role.project])
 
         if role.user not in users:
-            raise Exception("The user %s of role %s is not defined in the model." % (role.user, role.role_id))
-
-        role.requires.add(projects[role.project])
+            # happens with unmanaged users
+            continue
+       
         role.requires.add(users[role.user])
 
 

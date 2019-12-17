@@ -1,0 +1,20 @@
+import openstack
+import redhat
+
+#connection
+provider = openstack::Provider(
+    name="iaas_openstack",
+    connection_url=std::get_env("OS_AUTH_URL"),
+    username=std::get_env("OS_USERNAME"),
+    password=std::get_env("OS_PASSWORD"),
+    tenant=std::get_env("OS_PROJECT_NAME")
+)
+
+
+# searches an image based on the os_distro and os_version tags on the image
+centos_image = openstack::find_image(provider, redhat::centos7)
+std::print("image: {{centos_image}}")
+
+# searches the smallest flavor that has at least 1 CPU and 0.7Gb of ram
+small_image = openstack::find_flavor(provider, 1, 0.7)
+std::print("flavor: {{small_image}}")

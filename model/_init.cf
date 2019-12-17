@@ -120,9 +120,14 @@ Role.project [1] -- Project.roles [0:]
 Role.user [1] -- User.roles [0:]
 
 implementation roleImpl for Role:
-    self.requires = self.project
-    self.requires = self.user
-
+    if not self.purged:
+        if not self.project.purged:
+            self.requires = self.project
+        end
+        if not self.user.purged:
+            self.requires = self.user
+        end
+    end
     self.provider = self.user.provider
 
     self.role_id = "{{ project.name }}_{{ user.name }}_{{ role }}"

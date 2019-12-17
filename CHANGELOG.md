@@ -1,3 +1,6 @@
+# 3.2.2
+- added examples folder
+
 # 3.2.1
 - fix updates/creation for host with DHCP and fixed ip
 - added improved caching for find_image
