@@ -18,6 +18,7 @@ pipeline {
                 sh 'curl $OS_AUTH_URL -v -m 2'
             }
         }
+
         stage('setup') {
             steps {
                 script {
@@ -31,25 +32,25 @@ pipeline {
                 }
             }
         }
-    }
 
-    stage('tests') {
-        steps {
-            withCredentials([usernamePassword(credentialsId: 'packstack-super-user', passwordVariable: 'OS_PASSWORD', usernameVariable: 'OS_USERNAME')]) {
-                // fix for bug in pytest-inmanta where folder name is used as module name
-                dir('openstack'){
-                    sh '$INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests'
+        stage('tests') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'packstack-super-user', passwordVariable: 'OS_PASSWORD', usernameVariable: 'OS_USERNAME')]) {
+                    // fix for bug in pytest-inmanta where folder name is used as module name
+                    dir('openstack'){
+                        sh '$INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests'
+                    }
                 }
             }
         }
-    }
 
-    stage('linting') {
-        steps {
-            script {
-                sh '''
-                ${WORKSPACE}/env/bin/flake8 plugins tests
-                '''
+        stage('linting') {
+            steps {
+                script {
+                    sh '''
+                    ${WORKSPACE}/env/bin/flake8 plugins tests
+                    '''
+                }
             }
         }
     }
