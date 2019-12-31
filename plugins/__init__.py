@@ -16,7 +16,6 @@
     Contact: code@inmanta.com
 """
 
-import base64
 import datetime
 import logging
 import math
@@ -37,7 +36,7 @@ from inmanta.agent.handler import (
     cache,
     provider,
 )
-from inmanta.execute import proxy, util
+from inmanta.execute import proxy
 from inmanta.execute.util import Unknown
 from inmanta.export import dependency_manager
 from inmanta.plugins import plugin
@@ -892,7 +891,34 @@ class OpenStackHandler(CRUDHandler):
             return subnets["subnets"][0]
 
     def get_router(self, project_id=None, name=None, router_id=None):
-        """[{'allowed_address_pairs': [], 'extra_dhcp_opts': [], 'updated_at': '2018-01-22T13:29:25Z', 'device_owner': 'compute:nova', 'revision_number': 8, 'port_security_enabled': True, 'binding:profile': {}, 'fixed_ips': [{'subnet_id': 'aad30b7b-ab7b-441b-843f-8cef149ef4a1', 'ip_address': '10.255.255.10'}], 'id': 'd36a6022-652f-4d95-bae4-7301fb6a2b32', 'security_groups': ['0625ff63-dbca-4078-ad50-ba2bce935c64'], 'binding:vif_details': {'port_filter': True}, 'binding:vif_type': 'bridge', 'mac_address': 'fa:16:3e:f3:e7:2b', 'project_id': '727f8247b37f4199884676d19fef05cc', 'status': 'ACTIVE', 'binding:host_id': 'node1.inmanta.com', 'description': '', 'tags': [], 'device_id': 'fd290dc1-962c-4b12-9994-09f08aa76fa1', 'name': 'inmanta_unit_test_port', 'admin_state_up': True, 'network_id': '5dedda95-82d4-4a3a-9b8f-fa9a9c9e1997', 'tenant_id': '727f8247b37f4199884676d19fef05cc', 'created_at': '2018-01-22T13:29:21Z', 'binding:vnic_type': 'normal'}]
+        """
+        [{
+            'allowed_address_pairs': [],
+            'extra_dhcp_opts': [],
+            'updated_at': '2018-01-22T13:29:25Z',
+            'device_owner': 'compute:nova',
+            'revision_number': 8,
+            'port_security_enabled': True,
+            'binding:profile': {},
+            'fixed_ips': [{'subnet_id': 'aad30b7b-ab7b-441b-843f-8cef149ef4a1', 'ip_address': '10.255.255.10'}],
+            'id': 'd36a6022-652f-4d95-bae4-7301fb6a2b32',
+            'security_groups': ['0625ff63-dbca-4078-ad50-ba2bce935c64'],
+            'binding:vif_details': {'port_filter': True},
+            'binding:vif_type': 'bridge',
+            'mac_address': 'fa:16:3e:f3:e7:2b',
+            'project_id': '727f8247b37f4199884676d19fef05cc',
+            'status': 'ACTIVE',
+            'binding:host_id': 'node1.inmanta.com',
+            'description': '',
+            'tags': [],
+            'device_id': 'fd290dc1-962c-4b12-9994-09f08aa76fa1',
+            'name': 'inmanta_unit_test_port',
+            'admin_state_up': True,
+            'network_id': '5dedda95-82d4-4a3a-9b8f-fa9a9c9e1997',
+            'tenant_id': '727f8247b37f4199884676d19fef05cc',
+            'created_at': '2018-01-22T13:29:21Z',
+            'binding:vnic_type': 'normal'
+        }]
 
             Retrieve the router id based on the name of the network
         """

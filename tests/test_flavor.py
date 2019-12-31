@@ -2,9 +2,6 @@ import os
 
 import inmanta
 import pytest
-from keystoneauth1 import session
-from keystoneauth1.identity import v3
-from novaclient import client as nova_client
 
 
 def get_test_flavor(nova):

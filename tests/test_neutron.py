@@ -486,7 +486,6 @@ def test_shared_network(project, openstack):
     tenant1 = openstack.get_project("tenant1")
     tenant2 = openstack.get_project("tenant2")
     net_name = tenant1.get_resource_name("net")
-    port_name = tenant2.get_resource_name("port")
     key_name = tenant2.get_resource_name("key")
     server_name = tenant2.get_resource_name("server").replace("_", "-")
 
