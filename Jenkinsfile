@@ -48,7 +48,7 @@ pipeline {
             steps {
                 script {
                     sh '''
-                    ${WORKSPACE}/env/bin/flake8 plugins tests
+                    ${WORKSPACE}/env/bin/flake8 ${WORKSPACE}/plugins ${WORKSPACE}/tests
                     '''
                 }
             }
