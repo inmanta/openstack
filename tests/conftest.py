@@ -16,16 +16,15 @@
     Contact: code@inmanta.com
 """
 import os
-import pytest
 
+import pytest
+from glanceclient.v2 import client as glance_client
+from keystoneauth1 import exceptions
+from keystoneauth1 import session as keystone_session
+from keystoneclient.auth.identity import v3
+from keystoneclient.v3 import client as keystone_client
 from neutronclient.neutron import client as neutron_client
 from novaclient import client as nova_client
-from keystoneclient.auth.identity import v3
-from keystoneauth1 import session as keystone_session
-from keystoneauth1 import exceptions
-from keystoneclient.v3 import client as keystone_client
-from glanceclient.v2 import client as glance_client
-
 
 PREFIX = "inmanta_unit_test_"
 
@@ -36,22 +35,32 @@ def session():
     username = os.environ["OS_USERNAME"]
     password = os.environ["OS_PASSWORD"]
     tenant = os.environ["OS_PROJECT_NAME"]
-    auth = v3.Password(auth_url=auth_url, username=username, password=password, project_name=tenant,
-                       user_domain_id="default", project_domain_id="default")
+    auth = v3.Password(
+        auth_url=auth_url,
+        username=username,
+        password=password,
+        project_name=tenant,
+        user_domain_id="default",
+        project_domain_id="default",
+    )
     sess = keystone_session.Session(auth=auth)
     yield sess
+
 
 @pytest.fixture(scope="session")
 def nova(session):
     yield nova_client.Client("2", session=session)
 
+
 @pytest.fixture(scope="session")
 def neutron(session):
     yield neutron_client.Client("2.0", session=session)
 
+
 @pytest.fixture(scope="session")
 def keystone(session):
     yield keystone_client.Client(session=session)
+
 
 @pytest.fixture(scope="session")
 def glance(session):
@@ -62,7 +71,15 @@ class Project(object):
     """
         An project instance
     """
-    def __init__(self, tester: "OpenstackTester", auth_url: str, username: str, password: str, tenant: str):
+
+    def __init__(
+        self,
+        tester: "OpenstackTester",
+        auth_url: str,
+        username: str,
+        password: str,
+        tenant: str,
+    ):
         self._auth_url = auth_url
         self._username = username
         self._password = password
@@ -77,8 +94,14 @@ class Project(object):
     @property
     def session(self):
         if self._session_obj is None:
-            auth = v3.Password(auth_url=self._auth_url, username=self._username, password=self._password,
-                               project_name=self._tenant, user_domain_id="default", project_domain_id="default")
+            auth = v3.Password(
+                auth_url=self._auth_url,
+                username=self._username,
+                password=self._password,
+                project_name=self._tenant,
+                user_domain_id="default",
+                project_domain_id="default",
+            )
             self._session_obj = keystone_session.Session(auth=auth)
         return self._session_obj
 
@@ -113,6 +136,7 @@ class OpenstackTester(object):
     """
         Object that provides access to an openstack and performs cleanup
     """
+
     def __init__(self):
         self._projects = {}
         self._admin = None
@@ -153,8 +177,12 @@ class OpenstackTester(object):
             self.clean_project(prj)
         except exceptions.http.NotFound:
             # create the project
-            project = self.admin.keystone.projects.create(prefixed_tenant, description="Unit test project", enabled=True,
-                                                          domain="default")
+            project = self.admin.keystone.projects.create(
+                prefixed_tenant,
+                description="Unit test project",
+                enabled=True,
+                domain="default",
+            )
             prj.project_object = project
 
         # get the member role
@@ -173,7 +201,9 @@ class OpenstackTester(object):
         while count < 10 and not ready:
             ready = True
             for prj in self._projects.values():
-                done = self.clean_project(prj) if prj.project_object is not None else True
+                done = (
+                    self.clean_project(prj) if prj.project_object is not None else True
+                )
                 if prj.project_object is not None and done:
                     prj.project_object.delete()
                     prj.project_object = None
@@ -215,6 +245,7 @@ class OpenstackTester(object):
             return True
         except Exception:
             return False
+
 
 @pytest.fixture(scope="function")
 def openstack():

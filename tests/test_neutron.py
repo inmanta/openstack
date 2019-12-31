@@ -15,13 +15,14 @@
 
     Contact: code@inmanta.com
 """
-import pytest
 import inmanta
+import pytest
 
 
 def test_net(project, neutron):
     try:
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -30,7 +31,8 @@ def test_net(project, neutron):
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
     n = openstack::Network(provider=p, name="test_net", project=project, external=true)
-            """)
+            """
+        )
 
         n1 = project.deploy_resource("openstack::Network", name="test_net")
 
@@ -42,7 +44,8 @@ def test_net(project, neutron):
         ctx = project.deploy(n1)
         assert ctx.status == inmanta.const.ResourceState.deployed
 
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -51,7 +54,8 @@ def test_net(project, neutron):
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
     n = openstack::Network(provider=p, name="test_net", project=project, purged=true)
-            """)
+            """
+        )
 
         n1 = project.get_resource("openstack::Network", name="test_net")
         ctx = project.deploy(n1)
@@ -71,7 +75,8 @@ def test_net(project, neutron):
 def test_subnet(project, neutron):
     name = "inmanta_unit_test"
     try:
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -82,7 +87,9 @@ def test_subnet(project, neutron):
     n = openstack::Network(provider=p, name="%(name)s", project=project)
     subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
                                network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
-            """ % {"name": name})
+            """
+            % {"name": name}
+        )
 
         net = project.deploy_resource("openstack::Network")
         subnet = project.deploy_resource("openstack::Subnet")
@@ -94,7 +101,8 @@ def test_subnet(project, neutron):
         os_subnet = subnets[0]
         assert len(os_subnet["dns_nameservers"]) == 2
 
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -105,7 +113,9 @@ def test_subnet(project, neutron):
     n = openstack::Network(provider=p, name="%(name)s", project=project, purged=true)
     subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
                                network_address="10.255.255.0/24", purged=true)
-            """ % {"name": name})
+            """
+            % {"name": name}
+        )
 
         net = project.deploy_resource("openstack::Network")
         subnet = project.deploy_resource("openstack::Subnet")
@@ -136,7 +146,8 @@ def test_router(project, neutron):
 
     assert external is not None, "This test requires an external network to be defined."
 
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -152,7 +163,9 @@ n = openstack::Network(provider=p, name="%(name)s", project=project)
 subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
                            network_address="10.255.255.0/24")
 router.subnets = subnet
-        """ % {"external": external["name"], "name": name})
+        """
+        % {"external": external["name"], "name": name}
+    )
 
     net = project.deploy_resource("openstack::Network")
     subnet = project.deploy_resource("openstack::Subnet")
@@ -166,7 +179,8 @@ router.subnets = subnet
     ports = neutron.list_ports(device_id=routers[0]["id"])["ports"]
     assert len(ports) == 2
 
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -182,7 +196,9 @@ n = openstack::Network(provider=p, name="%(name)s", project=project, purged=true
 subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
                            network_address="10.255.255.0/24", purged=true)
 router.subnets = subnet
-        """ % {"external": external["name"], "name": name})
+        """
+        % {"external": external["name"], "name": name}
+    )
 
     project.deploy_resource("openstack::Router")
 
@@ -220,7 +236,8 @@ def test_router_port(project, neutron):
 
     assert external is not None, "This test requires an external network to be defined."
 
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -237,7 +254,9 @@ subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, na
                            network_address="10.255.255.0/24")
 
 openstack::RouterPort(provider=p, project=project, name="%(name)s", router=router, subnet=subnet, address="10.255.255.200")
-        """ % {"external": external["name"], "name": name})
+        """
+        % {"external": external["name"], "name": name}
+    )
 
     net = project.deploy_resource("openstack::Network")
     subnet = project.deploy_resource("openstack::Subnet")
@@ -253,7 +272,8 @@ openstack::RouterPort(provider=p, project=project, name="%(name)s", router=route
     assert len(ports) == 2
 
     # remove
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -271,7 +291,9 @@ subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, na
 
 openstack::RouterPort(provider=p, project=project, name="%(name)s", router=router, subnet=subnet, address="10.255.255.200",
                       purged=true)
-        """ % {"external": external["name"], "name": name})
+        """
+        % {"external": external["name"], "name": name}
+    )
 
     project.deploy_resource("openstack::RouterPort")
     project.deploy_resource("openstack::Router")
@@ -290,7 +312,8 @@ def test_security_group(project, neutron):
     if len(sgs["security_groups"]) > 0:
         neutron.delete_security_group(sgs["security_groups"][0]["id"])
 
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -305,14 +328,26 @@ openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_mi
                   remote_prefix="0.0.0.0/0")
 openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="tcp", port_min=161, port_max=162,
                   remote_prefix="0.0.0.0/0")
-        """ % {"name": name})
+        """
+        % {"name": name}
+    )
 
     project.deploy_resource("openstack::SecurityGroup")
     sgs = neutron.list_security_groups(name=name)
     assert len(sgs["security_groups"]) == 1
-    assert len([x for x in sgs["security_groups"][0]["security_group_rules"] if x["ethertype"] == "IPv4"]) == 3
+    assert (
+        len(
+            [
+                x
+                for x in sgs["security_groups"][0]["security_group_rules"]
+                if x["ethertype"] == "IPv4"
+            ]
+        )
+        == 3
+    )
 
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -327,16 +362,28 @@ openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_mi
                   remote_prefix="0.0.0.0/0")
 openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="tcp", port_min=161, port_max=162,
                   remote_prefix="0.0.0.0/0")
-        """ % {"name": name})
+        """
+        % {"name": name}
+    )
 
     # deploy a second time
     project.deploy_resource("openstack::SecurityGroup")
     sgs = neutron.list_security_groups(name=name)
     assert len(sgs["security_groups"]) == 1
-    assert len([x for x in sgs["security_groups"][0]["security_group_rules"] if x["ethertype"] == "IPv4"]) == 3
+    assert (
+        len(
+            [
+                x
+                for x in sgs["security_groups"][0]["security_group_rules"]
+                if x["ethertype"] == "IPv4"
+            ]
+        )
+        == 3
+    )
 
     # purge it
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 
@@ -349,7 +396,9 @@ sg_base = openstack::SecurityGroup(provider=p, project=project, name="%(name)s",
 openstack::IPrule(group=sg_base, direction="egress", ip_protocol="all", remote_prefix="0.0.0.0/0")
 openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_min=161, port_max=162,
                   remote_prefix="0.0.0.0/0")
-        """ % {"name": name})
+        """
+        % {"name": name}
+    )
 
     project.deploy_resource("openstack::SecurityGroup")
     sgs = neutron.list_security_groups(name=name)
@@ -359,11 +408,14 @@ openstack::IPrule(group=sg_base, direction="ingress", ip_protocol="udp", port_mi
 @pytest.mark.skip(reason="This tsest is currently broken and needs to be fixed")
 def test_security_group_vm(project, neutron, nova):
     name = "inmanta-unit-test"
-    key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
-           "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
-           "bart@wolf.inmanta.com")
+    key = (
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
+        "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
+        "bart@wolf.inmanta.com"
+    )
 
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 import ssh
@@ -393,7 +445,9 @@ vm.vm.security_groups=[sg_mgmt]
 vm2 = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s-2", os=os,
                      image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
 vm2.vm.security_groups=[sg_mgmt]
-        """ % {"name": name, "key": key})
+        """
+        % {"name": name, "key": key}
+    )
 
     sg1 = project.get_resource("openstack::SecurityGroup", name=name)
     ctx = project.deploy(sg1)
@@ -425,7 +479,7 @@ vm2.vm.security_groups=[sg_mgmt]
     assert ctx.status == inmanta.const.ResourceState.deployed
 
 
-def  test_shared_network(project, openstack):
+def test_shared_network(project, openstack):
     """
         Create a shared network as one tenant and add ports to it as another tenant
     """
@@ -437,7 +491,8 @@ def  test_shared_network(project, openstack):
     server_name = tenant2.get_resource_name("server").replace("_", "-")
 
     # create a shared network in tenant1
-    project.compile("""
+    project.compile(
+        """
     import unittest
     import openstack
 
@@ -448,13 +503,16 @@ def  test_shared_network(project, openstack):
     n = openstack::Network(provider=p, name="%(name)s", project=project, shared=true)
     subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="%(name)s",
                                network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
-            """ % {"name": net_name, "project": tenant1._tenant})
+            """
+        % {"name": net_name, "project": tenant1._tenant}
+    )
 
     project.deploy_resource("openstack::Network", name=net_name)
     project.deploy_resource("openstack::Subnet", name=net_name)
 
     # create a hostport on the shared network in tenant2
-    project.compile("""
+    project.compile(
+        """
     import unittest
     import openstack
     import ssh
@@ -478,14 +536,22 @@ def  test_shared_network(project, openstack):
                          subnet=s2)
     port = openstack::HostPort(provider=p, vm=vm.vm, subnet=s1, name="%(server_name)s_eth1", address="10.255.255.123",
                                project=project, port_index=2, purged=false, dhcp=false)
-            """ % {"net_name": net_name, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
+            """
+        % {
+            "net_name": net_name,
+            "project": tenant2._tenant,
+            "key_name": key_name,
+            "server_name": server_name,
+        }
+    )
 
     project.deploy_resource("openstack::Network", name=net_name + "2")
     project.deploy_resource("openstack::Subnet", name=net_name + "2")
     project.deploy_resource("openstack::VirtualMachine")
     project.deploy_resource("openstack::HostPort")
 
-    project.compile("""
+    project.compile(
+        """
     import unittest
     import openstack
     import ssh
@@ -517,11 +583,18 @@ def  test_shared_network(project, openstack):
 
     openstack::HostPort(provider=p, vm=vm.vm, subnet=s3, name="%(server_name)s_eth2", address="10.255.253.12",
                         project=project, port_index=3, purged=false, dhcp=false)
-            """ % {"net_name": net_name, "project": tenant2._tenant, "key_name": key_name, "server_name": server_name})
+            """
+        % {
+            "net_name": net_name,
+            "project": tenant2._tenant,
+            "key_name": key_name,
+            "server_name": server_name,
+        }
+    )
 
     project.deploy_resource("openstack::Network", name=net_name + "3")
     project.deploy_resource("openstack::Subnet", name=net_name + "3")
-    project.deploy_resource("openstack::HostPort", name=server_name+"_eth2")
+    project.deploy_resource("openstack::HostPort", name=server_name + "_eth2")
 
 
 def test_allowed_addr_port(project, openstack):
@@ -534,7 +607,8 @@ def test_allowed_addr_port(project, openstack):
     key_name = tenant1.get_resource_name("key")
     server_name = tenant1.get_resource_name("server").replace("_", "-")
 
-    project.compile("""
+    project.compile(
+        """
     import unittest
     import openstack
     import ssh
@@ -558,8 +632,15 @@ def test_allowed_addr_port(project, openstack):
     port = openstack::HostPort(provider=p, project=project, name="%(port_name)s", subnet=subnet, address="10.255.255.10",
                                dhcp=false, allowed_address_pairs=[p1, p2], vm=vm)
     vm.eth0_port = port
-            """ % {"name": net_name, "project": tenant1._tenant, "port_name": port_name, "server_name": server_name,
-                   "key_name": key_name})
+            """
+        % {
+            "name": net_name,
+            "project": tenant1._tenant,
+            "port_name": port_name,
+            "server_name": server_name,
+            "key_name": key_name,
+        }
+    )
 
     project.deploy_resource("openstack::Network", name=net_name)
     project.deploy_resource("openstack::Subnet", name=net_name)
