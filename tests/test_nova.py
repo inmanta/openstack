@@ -30,12 +30,17 @@ def print_ctx(ctx):
 
 def test_boot_vm(project, keystone, nova, neutron):
     name = "inmanta-unit-test"
-    key = ("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
-           "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
-           "bart@wolf.inmanta.com")
+    key = (
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
+        "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
+        "bart@wolf.inmanta.com"
+    )
 
-    project.add_fact("openstack::Host[dnetcloud,name=%s]" % name, "ip_address", "10.1.1.1")
-    project.compile("""
+    project.add_fact(
+        "openstack::Host[dnetcloud,name=%s]" % name, "ip_address", "10.1.1.1"
+    )
+    project.compile(
+        """
 import unittest
 import openstack
 import ssh
@@ -52,7 +57,9 @@ subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, 
                            network_address="10.255.255.0/24")
 vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os,
                      image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
-        """ % {"name": name, "key": key})
+        """
+        % {"name": name, "key": key}
+    )
 
     n1 = project.get_resource("openstack::Network", name=name)
     ctx = project.deploy(n1)
@@ -70,7 +77,8 @@ vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s",
     assert server is not None
 
     # cleanup
-    project.compile("""
+    project.compile(
+        """
 import unittest
 import openstack
 import ssh
@@ -88,7 +96,9 @@ subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, 
                            network_address="10.255.255.0/24", purged=true)
 vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(name)s", os=os, purged=true,
                      image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="", subnet=subnet)
-        """ % {"name": name, "key": key})
+        """
+        % {"name": name, "key": key}
+    )
 
     h1 = project.get_resource("openstack::VirtualMachine", name=name)
     ctx = project.deploy(h1)

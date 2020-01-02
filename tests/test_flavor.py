@@ -1,17 +1,15 @@
 import os
 
-import pytest
-from keystoneauth1.identity import v3
-from keystoneauth1 import session
-from novaclient import client as nova_client
-
 import inmanta
+import pytest
+
 
 def get_test_flavor(nova):
     flavors = nova.flavors.list()
     for flavor in flavors:
         if flavor.name == "test-flavor":
             return flavor
+
 
 # Flavors are not tied to projects, so need seperate cleanup
 def cleanup_flavor(nova):
@@ -20,16 +18,19 @@ def cleanup_flavor(nova):
         if flavor.name == "test-flavor":
             nova.flavors.delete(flavor)
 
+
 @pytest.fixture()
 def cleanup(nova):
     cleanup_flavor(nova)
     yield
     cleanup_flavor(nova)
 
+
 def test_flavor(project, nova, cleanup):
     # test create
     flavor_name = "test-flavor"
-    project.compile(f"""
+    project.compile(
+        f"""
 import openstack
 
 tenant = std::get_env("OS_PROJECT_NAME")
@@ -46,7 +47,8 @@ flavor=openstack::Flavor(
         "quota:cpu_quota": 10000
     }}
 )
-""")
+"""
+    )
     created_flavor = project.get_resource("openstack::Flavor", name=flavor_name)
     assert created_flavor
     assert created_flavor.ram == 1024
@@ -58,9 +60,7 @@ flavor=openstack::Flavor(
     assert created_flavor.swap == 0
     assert created_flavor.rxtx_factor == 1.0
     assert created_flavor.is_public
-    assert created_flavor.extra_specs == {
-        "quota:cpu_quota": "10000"
-    }
+    assert created_flavor.extra_specs == {"quota:cpu_quota": "10000"}
 
     assert created_flavor.admin_user == os.environ.get("OS_USERNAME")
     assert created_flavor.admin_password == os.environ.get("OS_PASSWORD")
@@ -77,7 +77,8 @@ flavor=openstack::Flavor(
     assert not ctx_dryrun_2.changes
 
     # test update 1: extra_specs update
-    project.compile(f"""
+    project.compile(
+        f"""
 import openstack
 
 tenant = std::get_env("OS_PROJECT_NAME")
@@ -95,11 +96,12 @@ flavor=openstack::Flavor(
         "hw:watchdog_action": "reset"
     }}
 )
-""")
+"""
+    )
     updated_flavor = project.get_resource("openstack::Flavor", name=flavor_name)
     assert updated_flavor.extra_specs == {
         "quota:cpu_period": "20000",
-        "hw:watchdog_action": "reset"
+        "hw:watchdog_action": "reset",
     }
 
     ctx_deploy_3 = project.deploy(updated_flavor)
@@ -109,7 +111,8 @@ flavor=openstack::Flavor(
     assert not ctx_dryrun_3.changes
 
     # test update 2: illegal update
-    project.compile(f"""
+    project.compile(
+        f"""
 import openstack
 
 tenant = std::get_env("OS_PROJECT_NAME")
@@ -127,7 +130,8 @@ flavor=openstack::Flavor(
         "hw:watchdog_action": "reset"
     }}
 )
-""")
+"""
+    )
     updated_flavor = project.get_resource("openstack::Flavor", name=flavor_name)
     assert updated_flavor.ram == 2048
 
@@ -135,7 +139,8 @@ flavor=openstack::Flavor(
     assert ctx_deploy_4.status == inmanta.const.ResourceState.failed
 
     # test delete
-    project.compile(f"""
+    project.compile(
+        f"""
 import openstack
 
 tenant = std::get_env("OS_PROJECT_NAME")
@@ -153,7 +158,8 @@ flavor=openstack::Flavor(
     }},
     purged=true
 )
-""")
+"""
+    )
     deleted_flavor = project.get_resource("openstack::Flavor", name=flavor_name)
     assert deleted_flavor.purged
 

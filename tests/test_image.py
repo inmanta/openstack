@@ -5,7 +5,7 @@ import pytest
 
 TEST_IMAGE_NAME = "inmanta_unit_test"
 TEST_PROJECT_NAME = "inmanta_unit_test"
-CIRROS_URI = "https://www.example.com/" # not an image but speeds up tests by a lot
+CIRROS_URI = "https://www.example.com/"  # not an image but speeds up tests by a lot
 
 OPENSTACK_BASE = f"""
 import openstack
@@ -16,14 +16,17 @@ provider = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH
 
 """
 
+
 def get_test_image(glance):
     return [image for image in glance.images.list() if image.name == TEST_IMAGE_NAME]
+
 
 def cleanup_image(glance):
     for image in get_test_image(glance):
         if image.protected:
             glance.images.update(image.id, protected=False)
         glance.images.delete(image.id)
+
 
 @pytest.fixture()
 def cleanup(glance):
@@ -33,7 +36,9 @@ def cleanup(glance):
 
 
 def test_create_image(project, glance, cleanup):
-    project.compile(OPENSTACK_BASE + f"""
+    project.compile(
+        OPENSTACK_BASE
+        + f"""
 image=openstack::Image(
     provider=provider,
     name="{TEST_IMAGE_NAME}",
@@ -43,7 +48,8 @@ image=openstack::Image(
     }}
 )
 
-""")
+"""
+    )
     created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
     assert created_image
     assert created_image.name
@@ -73,19 +79,24 @@ image=openstack::Image(
     ctx_deploy_2 = project.deploy(created_image)
     assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed
 
-    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    matching_images = [
+        image for image in glance.images.list() if TEST_IMAGE_NAME == image.name
+    ]
     assert len(matching_images) == 1
 
 
 def test_create_image_no_skip(project, glance, cleanup):
-    project.compile(OPENSTACK_BASE + f"""
+    project.compile(
+        OPENSTACK_BASE
+        + f"""
 image=openstack::Image(
     provider=provider,
     name="{TEST_IMAGE_NAME}",
     uri="{CIRROS_URI}",
     skip_on_deploy=false
 )
-""")
+"""
+    )
     created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
     assert not created_image.skip_on_deploy
 
@@ -95,12 +106,16 @@ image=openstack::Image(
     ctx_deploy_1 = project.deploy(created_image)
     assert ctx_deploy_1.status == inmanta.const.ResourceState.deployed
 
-    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    matching_images = [
+        image for image in glance.images.list() if TEST_IMAGE_NAME == image.name
+    ]
     assert len(matching_images) == 1
 
 
 def test_delete_image(project, glance, cleanup):
-    project.compile(OPENSTACK_BASE + f"""
+    project.compile(
+        OPENSTACK_BASE
+        + f"""
 image=openstack::Image(
     provider=provider,
     name="{TEST_IMAGE_NAME}",
@@ -108,16 +123,21 @@ image=openstack::Image(
     skip_on_deploy=false,
     purge_on_delete=true
 )
-""")
+"""
+    )
     created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
 
     ctx_deploy_1 = project.deploy(created_image)
     assert ctx_deploy_1.status == inmanta.const.ResourceState.deployed
 
-    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    matching_images = [
+        image for image in glance.images.list() if TEST_IMAGE_NAME == image.name
+    ]
     assert len(matching_images) == 1
 
-    project.compile(OPENSTACK_BASE + f"""
+    project.compile(
+        OPENSTACK_BASE
+        + f"""
 image=openstack::Image(
     provider=provider,
     name="{TEST_IMAGE_NAME}",
@@ -126,7 +146,8 @@ image=openstack::Image(
     purge_on_delete=true,
     purged=true
 )
-""")
+"""
+    )
 
     deleted_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
     assert deleted_image.purged
@@ -134,12 +155,16 @@ image=openstack::Image(
     ctx_deploy_2 = project.deploy(deleted_image)
     assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed
 
-    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    matching_images = [
+        image for image in glance.images.list() if TEST_IMAGE_NAME == image.name
+    ]
     assert not matching_images
 
 
 def test_update_image(project, glance, cleanup):
-    project.compile(OPENSTACK_BASE + f"""
+    project.compile(
+        OPENSTACK_BASE
+        + f"""
 image=openstack::Image(
     provider=provider,
     name="{TEST_IMAGE_NAME}",
@@ -153,27 +178,28 @@ image=openstack::Image(
         "test3": "test"
     }}
 )
-""")
+"""
+    )
     created_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
 
     assert created_image.visibility == "public"
     assert created_image.protected
-    assert created_image.metadata == {
-        "test1": "test",
-        "test2": "test",
-        "test3": "test"
-    }
+    assert created_image.metadata == {"test1": "test", "test2": "test", "test3": "test"}
 
     ctx_deploy_1 = project.deploy(created_image)
     assert ctx_deploy_1.status == inmanta.const.ResourceState.deployed
 
-    matching_images = [image for image in glance.images.list() if TEST_IMAGE_NAME == image.name]
+    matching_images = [
+        image for image in glance.images.list() if TEST_IMAGE_NAME == image.name
+    ]
     assert len(matching_images) == 1
 
     # test that non inmanta keys don't get deleted
-    glance.images.update(matching_images[0].id, non_inmanta_key = "test")
+    glance.images.update(matching_images[0].id, non_inmanta_key="test")
 
-    project.compile(OPENSTACK_BASE + f"""
+    project.compile(
+        OPENSTACK_BASE
+        + f"""
 image=openstack::Image(
     provider=provider,
     name="{TEST_IMAGE_NAME}",
@@ -187,7 +213,8 @@ image=openstack::Image(
         "test2": "not_test"
     }}
 )
-""")
+"""
+    )
 
     updated_image = project.get_resource("openstack::Image", name=TEST_IMAGE_NAME)
 

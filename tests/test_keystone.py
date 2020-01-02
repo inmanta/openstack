@@ -33,7 +33,8 @@ def print_ctx(ctx):
 def test_project(project, keystone):
     try:
         project_name = "inmanta_unit_test"
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -41,7 +42,9 @@ def test_project(project, keystone):
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     project = openstack::Project(provider=p, name="%s", description="", enabled=true)
-            """ % project_name)
+            """
+            % project_name
+        )
 
         n1 = project.get_resource("openstack::Project", name=project_name)
         ctx = project.deploy(n1)
@@ -49,7 +52,8 @@ def test_project(project, keystone):
 
         keystone.projects.find(name=project_name)
 
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -57,7 +61,9 @@ def test_project(project, keystone):
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     project = openstack::Project(provider=p, name="%s", description="", enabled=true, purged=true)
-            """ % project_name)
+            """
+            % project_name
+        )
 
         n1 = project.get_resource("openstack::Project", name=project_name)
         ctx = project.deploy(n1)
@@ -79,7 +85,8 @@ def test_user(project, keystone):
         pw = "12345678"
 
         # create the user
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -87,18 +94,23 @@ def test_user(project, keystone):
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     openstack::User(provider=p, name="%s", email="abc", password="%s")
-            """ % (user_name, pw))
+            """
+            % (user_name, pw)
+        )
 
         n1 = project.get_resource("openstack::User", name=user_name)
         ctx = project.deploy(n1)
         assert ctx.status == inmanta.const.ResourceState.deployed
 
         keystone.users.find(name=user_name)
-        c = client.Client(auth_url=os.environ["OS_AUTH_URL"], username=user_name, password=pw)
+        c = client.Client(
+            auth_url=os.environ["OS_AUTH_URL"], username=user_name, password=pw
+        )
         assert c.authenticate()
 
         # change the password
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -106,7 +118,9 @@ def test_user(project, keystone):
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     openstack::User(provider=p, name="%s", email="abc", password="%s")
-            """ % (user_name, user_name))
+            """
+            % (user_name, user_name)
+        )
 
         n1 = project.get_resource("openstack::User", name=user_name)
         ctx = project.deploy(n1)
@@ -115,7 +129,8 @@ def test_user(project, keystone):
         # c = client.Client(auth_url=os.environ["OS_AUTH_URL"], username=user_name, password=user_name)
         # assert c.authenticate()
 
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -123,7 +138,9 @@ def test_user(project, keystone):
     p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
                             password=std::get_env("OS_PASSWORD"), tenant=tenant)
     openstack::User(provider=p, name="%s", email="abc", purged=true)
-            """ % user_name)
+            """
+            % user_name
+        )
 
         n1 = project.get_resource("openstack::User", name=user_name)
         ctx = project.deploy(n1)
@@ -145,7 +162,8 @@ def test_role(project, keystone):
         role_name = "Member"
 
         # create the user, project and role
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -155,7 +173,9 @@ def test_role(project, keystone):
     project = openstack::Project(provider=p, name="%(name)s", description="", enabled=true)
     user = openstack::User(provider=p, name="%(name)s", email="abc", password="")
     openstack::Role(role="%(role)s", project=project, user=user)
-            """ % {"name": user_name, "role": role_name})
+            """
+            % {"name": user_name, "role": role_name}
+        )
 
         u = project.get_resource("openstack::User", name=user_name)
         ctx = project.deploy(u)
@@ -177,7 +197,8 @@ def test_role(project, keystone):
 
         # remove the role
         # create the user, project and role
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -187,7 +208,9 @@ def test_role(project, keystone):
     project = openstack::Project(provider=p, name="%(name)s", description="", enabled=true)
     user = openstack::User(provider=p, name="%(name)s", email="abc", password="")
     openstack::Role(role="%(role)s", project=project, user=user, purged=true)
-            """ % {"name": user_name, "role": role_name})
+            """
+            % {"name": user_name, "role": role_name}
+        )
 
         r = project.get_resource("openstack::Role")
         ctx = project.deploy(r)
@@ -218,7 +241,8 @@ def test_service_endpoints(project, keystone):
         service_name = "test_server"
 
         # create
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -228,7 +252,9 @@ def test_service_endpoints(project, keystone):
     s = openstack::Service(name="%(name)s", type="testing", description="Testing!!!!", provider=p)
     openstack::EndPoint(region="RegionOne", service=s, public_url="http://localhost:1234", admin_url="http://localhost:1234",
                         internal_url="http://localhost:1234")
-            """ % {"name": service_name})
+            """
+            % {"name": service_name}
+        )
 
         s = project.get_resource("openstack::Service")
         ctx = project.deploy(s)
@@ -245,7 +271,8 @@ def test_service_endpoints(project, keystone):
         assert len(eps) == 3
 
         # update
-        project.compile("""
+        project.compile(
+            """
     import unittest
     import openstack
 
@@ -255,7 +282,9 @@ def test_service_endpoints(project, keystone):
     s = openstack::Service(name="%(name)s", type="testing", description="Testing!", provider=p)
     openstack::EndPoint(region="RegionOne", service=s, public_url="http://localhost:12345", admin_url="http://localhost:12345",
                         internal_url="http://localhost:12345")
-            """ % {"name": service_name})
+            """
+            % {"name": service_name}
+        )
 
         s = project.get_resource("openstack::Service")
         ctx = project.deploy(s)
