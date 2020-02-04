@@ -656,41 +656,37 @@ def openstack_dependencies(config_model, resource_model):
 
     for _, res in resource_model.items():
         if res.id.entity_type == "openstack::Project":
-            if not res.purged:
                 projects[res.name] = res
 
         elif res.id.entity_type == "openstack::Network":
-            if not res.purged:
                 networks[res.name] = res
 
         elif res.id.entity_type == "openstack::Router":
-            if not res.purged:
                 routers[res.name] = res
 
         elif res.id.entity_type == "openstack::Subnet":
-            if not res.purged:
                 subnets[res.name] = res
 
         elif res.id.entity_type == "openstack::VirtualMachine":
-            if not res.purged:
                 vms[res.name] = res
 
         elif res.id.entity_type == "openstack::HostPort":
-            if not res.purged:
                 ports[res.name] = res
 
         elif res.id.entity_type == "openstack::FloatingIP":
-            if not res.purged:
                 fips[res.name] = res
 
         elif res.id.entity_type == "openstack::SecurityGroup":
-            if not res.purged:
                 sgs[res.name] = res
 
     # they require the tenant to exist
     for network in networks.values():
         if network.model.project.name in projects:
-            network.requires.add(projects[network.model.project.name])
+            project = projects[network.model.project.name]
+            if not project.purged:
+                network.requires.add(project)
+            else:
+                project.requires.add(network)
 
     for router in routers.values():
         if router.model.project.name in projects:
@@ -709,19 +705,35 @@ def openstack_dependencies(config_model, resource_model):
 
     for subnet in subnets.values():
         if subnet.model.project.name in projects:
-            subnet.requires.add(projects[subnet.model.project.name])
+            project = projects[subnet.model.project.name]
+            if not project.purged:
+                subnet.requires.add(project)
+            else:
+                project.requires.add(subnet)
 
         # also require the network it is attached to
         if subnet.model.network.name in networks:
-            subnet.requires.add(networks[subnet.model.network.name])
+            network = networks[subnet.model.network.name]
+            if not network.purged:
+                subnet.requires.add(network)
+            else:
+                network.requires.add(subnet)
 
     for vm in vms.values():
         if vm.model.project.name in projects:
-            vm.requires.add(projects[vm.model.project.name])
+            project = projects[vm.model.project.name]
+            if not project.purged:
+                vm.requires.add(project)
+            else:
+                project.requires.add(vm)
 
         for port in vm.ports:
             if port["network"] in subnets:
-                vm.requires.add(subnets[port["network"]])
+                subnet = subnets[port["network"]]
+                if not subnet.purged:
+                    vm.requires.add(subnets[port["network"]])
+                else:
+                    subnet.requires.add(vm)
 
         for sg in vm.security_groups:
             if sg in sgs:
@@ -729,13 +741,25 @@ def openstack_dependencies(config_model, resource_model):
 
     for port in ports.values():
         if port.model.project.name in projects:
-            port.requires.add(projects[port.model.project.name])
+            project = projects[port.model.project.name]
+            if not project.purged:
+                port.requires.add(project)
+            else:
+                project.requires.add(port)
 
-        if port.network in projects:
-            port.requires.add(subnets[port.network])
+        if port.subnet in subnets:
+            subnet = subnets[port.subnet]
+            if not subnet.purged:
+                port.requires.add(subnet)
+            else:
+                subnet.requires.add(port)
 
         if port.host in vms:
-            port.requires.add(vms[port.host])
+            vm = vms[port.host]
+            if not vm.purged:
+                port.requires.add(vm)
+            else:
+                vm.requires.add(port)
 
     for fip in fips.values():
         if fip.external_network in networks:
@@ -2078,10 +2102,11 @@ class HostPortHandler(OpenStackHandler):
                 vm_state = getattr(vm, "OS-EXT-STS:vm_state")
                 if vm_state == "active":
                     return vm
+            else:
+                return None
 
             ctx.info(
-                "VM for port is not in active state, but %(state)s. Waiting and retrying in 5 seconds.",
-                state=vm_state,
+                "VM for port is not in active state. Waiting and retrying in 5 seconds.",
             )
             tries += 1
             time.sleep(resource.wait)
@@ -2108,17 +2133,17 @@ class HostPortHandler(OpenStackHandler):
         ctx.set("network", network)
 
         vm = self.wait_for_active(ctx, project_id, resource)
+        ctx.set("vm", vm) 
+        
         if vm is None:
-            raise SkipResource(
-                "Unable to create host port because the vm does not exist."
-            )
-
-        ctx.set("vm", vm)
+            # VM does not exist
+            raise ResourcePurged()       
 
         port = self.get_port(ctx, network["id"], vm.id)
         ctx.set("port", port)
         if port is None:
             raise ResourcePurged()
+
 
         resource.purged = False
         if resource.address and len(port["fixed_ips"]) > 0:
@@ -2163,6 +2188,12 @@ class HostPortHandler(OpenStackHandler):
         project_id = ctx.get("project_id")
         network = ctx.get("network")
         vm = ctx.get("vm")
+
+        if vm is None:
+            raise SkipResource(
+                "Unable to create host port because the vm does not exist."
+            )
+
         subnet = self.get_subnet(project_id, name=resource.subnet)
         if subnet is None:
             raise SkipResource(
