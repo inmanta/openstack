@@ -39,7 +39,7 @@ pipeline {
                         sh '''
                             export OS_PROJECT_NAME="${OS_USERNAME}"
                             rm -f server_id port_id
-                            $INMANTA_TEST_ENV/bin/openstack server create --config-drive true --user-data ./openstack/ci/user_data --image packstack-snapshot --flavor c4m16d20 --network 14376e55-8447-4aa9-9b35-b8f922eadbd6 -c id -f value --wait "packstack (192.168.26.18)" > server_id
+                            $INMANTA_TEST_ENV/bin/openstack server create --config-drive true --user-data ./openstack/ci/user_data --image packstack-snapshot --flavor c4m16d20 --network 14376e55-8447-4aa9-9b35-b8f922eadbd6 -c id -f value --wait packstack > server_id
                             server_id=$(cat server_id)
                             $INMANTA_TEST_ENV/bin/openstack port list --server ${server_id} -c id -f value > port_id
                             port_id=$(cat port_id)
