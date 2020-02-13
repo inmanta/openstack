@@ -57,7 +57,9 @@ pipeline {
                               fi
 
                               for port in 8774 5000 9292 9696 8778 8776; do
+                                set +e
                                 curl http://192.168.26.18:${port}
+                                set -e
                                 exitcode=$?
                                 if [ ${exitcode} -ne 0 ]; then
                                   sleep 1
@@ -110,7 +112,7 @@ pipeline {
                     sh '''
                         if [ -e server_id ]; then
                             export OS_PROJECT_NAME="${OS_USERNAME}"
-                            $INMANTA_TEST_ENV/bin/openstack server delete $(cat server_id)'
+                            $INMANTA_TEST_ENV/bin/openstack server delete $(cat server_id)
                         fi
                     '''
                 }
