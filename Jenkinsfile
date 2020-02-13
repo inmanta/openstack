@@ -48,22 +48,25 @@ pipeline {
 
                             echo "Wait until Packstack is up..."
 
-                            exitcode=1
+                            response=500
                             counter=0
-                            while [ ${exitcode} -ne 0 ]; do
+                            while [ ${response} -ne 0 ]; do
                               if [ ${counter} -ge 300 ]; then
                                 echo "Timeout"
                                 exit 1
                               fi
 
                               for port in 8774 5000 9292 9696 8778 8776; do
+                                echo "Checking is http://192.168.26.18:${port} is up"
                                 set +e
-                                curl http://192.168.26.18:${port}
+                                response=$(curl -s -o /dev/null -w '%{http_code}' http://192.168.26.18:${port})
                                 set -e
-                                exitcode=$?
-                                if [ ${exitcode} -ne 0 ]; then
-                                  sleep 1
+                                if [ ${response} -ne 200 ]; then
+                                  echo "Not available (Response: ${response})"
+                                  sleep 5
                                   break
+                                else
+                                  echo "OK (Response: ${response})"
                                 fi
                               done
 
