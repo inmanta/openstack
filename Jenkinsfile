@@ -96,6 +96,9 @@ pipeline {
                     // fix for bug in pytest-inmanta where folder name is used as module name
                     dir('openstack'){
                         sh '''
+                            echo "${OS_USERNAME}" > test
+                            echo "${OS_PASSWORD}" >> test
+                            echo "${OS_AUTH_URL}" >> test
                             export OS_PROJECT_NAME="${OS_USERNAME}"
                             $INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests
                         '''
