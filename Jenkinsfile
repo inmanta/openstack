@@ -57,7 +57,7 @@ pipeline {
                               fi
 
                               for port in 8774 5000 9292 9696 8778 8776; do
-                                echo "Checking is http://192.168.26.18:${port} is up"
+                                echo "Checking if http://192.168.26.18:${port} is up"
                                 set +e
                                 response=$(curl -s -o /dev/null -w '%{http_code}' http://192.168.26.18:${port})
                                 set -e
