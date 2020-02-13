@@ -39,7 +39,7 @@ pipeline {
                         sh '''
                             export OS_PROJECT_NAME="${OS_USERNAME}"
                             rm -f server_id port_id
-                            $INMANTA_TEST_ENV/bin/openstack -vvv --log-file log.txt server create --config-drive true --user-data ./openstack/ci/user_data --image packstack-snapshot --flavor c4m16d20 --network 14376e55-8447-4aa9-9b35-b8f922eadbd6 -c id -f value --wait packstack > server_id
+                            $INMANTA_TEST_ENV/bin/openstack server create --config-drive true --user-data ./openstack/ci/user_data --image packstack-snapshot --flavor c4m16d20 --network 14376e55-8447-4aa9-9b35-b8f922eadbd6 -c id -f value --wait packstack > server_id
                             server_id=$(cat server_id)
                             $INMANTA_TEST_ENV/bin/openstack port list --server ${server_id} -c id -f value > port_id
                             port_id=$(cat port_id)
@@ -48,9 +48,9 @@ pipeline {
 
                             echo "Wait until Packstack is up..."
 
-                            response=500
+                            exitcode=1
                             counter=0
-                            while [ ${response} -ne 200 ]; do
+                            while [ ${exitcode} -ne 0 ]; do
                               if [ ${counter} -ge 300 ]; then
                                 echo "Timeout"
                                 exit 1
@@ -59,14 +59,14 @@ pipeline {
                               for port in 8774 5000 9292 9696 8778 8776; do
                                 echo "Checking if http://192.168.26.18:${port} is up"
                                 set +e
-                                response=$(curl -s -o /dev/null -w '%{http_code}' http://192.168.26.18:${port})
+                                exitcode=$(curl --fail http://192.168.26.18:${port})
                                 set -e
-                                if [ ${response} -ne 200 ]; then
-                                  echo "Not available (Response: ${response})"
+                                if [ ${exitcode} -ne 0 ]; then
+                                  echo "Not available"
                                   sleep 5
                                   break
                                 else
-                                  echo "OK (Response: ${response})"
+                                  echo "OK"
                                 fi
                               done
 
