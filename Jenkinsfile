@@ -87,7 +87,7 @@ pipeline {
                         sh '''
                             export OS_PROJECT_NAME="${OS_USERNAME}"
                             $INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests
-                        ''''
+                        '''
                     }
                 }
             }
