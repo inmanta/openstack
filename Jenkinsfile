@@ -59,7 +59,7 @@ pipeline {
                               for port in 8774 5000 9292 9696 8778 8776; do
                                 echo "Checking if http://192.168.26.18:${port} is up"
                                 set +e
-                                curl --fail http://192.168.26.18:${port}
+                                curl http://192.168.26.18:${port}
                                 exitcode=$?
                                 set -e
                                 if [ ${exitcode} -ne 0 ]; then
