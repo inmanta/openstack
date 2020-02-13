@@ -50,7 +50,7 @@ pipeline {
 
                             response=500
                             counter=0
-                            while [ ${response} -ne 0 ]; do
+                            while [ ${response} -ne 200 ]; do
                               if [ ${counter} -ge 300 ]; then
                                 echo "Timeout"
                                 exit 1
