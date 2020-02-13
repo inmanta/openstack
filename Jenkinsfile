@@ -8,6 +8,11 @@ pipeline {
 
     environment {
         INMANTA_TEST_ENV="${env.WORKSPACE}/env"
+        OS_USER_DOMAIN_NAME='Default'	
+        OS_PROJECT_DOMAIN_ID='default'	
+        OS_REGION_NAME='RegionOne'	
+        OS_INTERFACE='public'	
+        OS_IDENTITY_API_VERSION=3
     } 
 
     stages {
