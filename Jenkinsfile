@@ -8,12 +8,6 @@ pipeline {
 
     environment {
         INMANTA_TEST_ENV="${env.WORKSPACE}/env"
-        OS_PROJECT_NAME='admin'
-        OS_USER_DOMAIN_NAME='Default'
-        OS_PROJECT_DOMAIN_ID='default'
-        OS_REGION_NAME='RegionOne'
-        OS_INTERFACE='public'
-        OS_IDENTITY_API_VERSION=3
     } 
 
     stages {
@@ -38,6 +32,7 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'jenkins_on_openstack', passwordVariable: 'OS_PASSWORD', usernameVariable: 'OS_USERNAME'),
                                  string(credentialsId: 'jenkins_on_openstack_url_node3', variable: 'OS_AUTH_URL')]) {
                         sh '''
+                            export OS_PROJECT_NAME="${OS_USERNAME}"
                             rm -f server_id port_id
                             $INMANTA_TEST_ENV/bin/openstack -vvv --log-file log.txt server create --config-drive true --user-data ./openstack/ci/user_data --image packstack-snapshot --flavor c4m16d20 --network 14376e55-8447-4aa9-9b35-b8f922eadbd6 -c id -f value --wait packstack > server_id
                             server_id=$(cat server_id)
@@ -89,7 +84,10 @@ pipeline {
                                  string(credentialsId: 'packstack_url', variable: 'OS_AUTH_URL')]) {
                     // fix for bug in pytest-inmanta where folder name is used as module name
                     dir('openstack'){
-                        sh '$INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests'
+                        sh '''
+                            export OS_PROJECT_NAME="${OS_USERNAME}"
+                            $INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests
+                        ''''
                     }
                 }
             }
@@ -106,6 +104,7 @@ pipeline {
                                  string(credentialsId: 'jenkins_on_openstack_url_node3', variable: 'OS_AUTH_URL')]) {
                     sh '''
                         if [ -e server_id ]; then
+                            export OS_PROJECT_NAME="${OS_USERNAME}"
                             $INMANTA_TEST_ENV/bin/openstack server delete $(cat server_id)'
                         fi
                     '''
