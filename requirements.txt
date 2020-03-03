@@ -2,4 +2,4 @@ python-dateutil
 python-keystoneclient
 python-novaclient
 python-neutronclient
-python-glanceclient<2.18
+python-glanceclient<3.1
