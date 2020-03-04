@@ -546,6 +546,7 @@ class FloatingIP(OpenstackResource):
     def get_external_network(_, fip):
         return fip.external_network.name
 
+    @staticmethod
     def get_address(_, fip):
         if fip.force_ip:
             return fip.address
@@ -644,12 +645,23 @@ class EndPoint(KeystoneResource):
     fields = ("region", "internal_url", "public_url", "admin_url", "service_id")
 
 
+MANAGED_DEPENDENCIES = {
+    "openstack::Project",
+    "openstack::Network",
+    "openstack::Router",
+    "openstack::Subnet",
+    "openstack::VirtualMachine",
+    "openstack::HostPort",
+    "openstack::FloatingIP",
+    "openstack::SecurityGroup"
+}
+
 def resource_collector(resource_model):
     collector = defaultdict(lambda:defaultdict(lambda:{}))
     
     for resource in resource_model.values():
         rtype = resource.id.entity_type
-        if rtype.startswith("openstack::"):
+        if rtype in MANAGED_DEPENDENCIES:
             provider = resource.model.provider
             if not resource.purged:
                 collector[provider][rtype][resource.name] = resource

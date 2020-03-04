@@ -1,3 +1,6 @@
+# 3.3.2
+- fixed dependency manager mixing up identical objects in different providers (#48)
+
 # 3.3.1
 - added examples folder
 
