@@ -28,7 +28,9 @@ implementation allfor for AllFor:
         flavor="1c1m",
         user_data="",
         subnet=subnet,
-        os=std::linux)
+        os=std::linux,
+        security_groups=sg
+        )
     router = openstack::Router(name="myr",
                       provider=p,
                       project=project,
@@ -40,7 +42,13 @@ implementation allfor for AllFor:
         project=project,
         external_network=net,
         port=vm.vm.eth0_port, 
-    )  
+    ) 
+
+    sg = openstack::SecurityGroup(
+        provider=p, 
+        project=project,
+        name="sg1"
+    )
 end
 """
 
@@ -65,28 +73,31 @@ def test_dependency_handling(project):
                 continue
             assert agentname == r.get_agent_name()
 
-    def assert_before(typea, typeb, tenant="t1"):
+    def assert_requires(typea, typeb, tenant="t1"):
         for tenant in ["t1","t2"]:
             a = project.get_resource(f"openstack::{typea}", admin_user=tenant)
             b = project.get_resource(f"openstack::{typeb}", admin_user=tenant)
             assert b.id in a.requires
 
 
-    assert_before("Network", "Project")
+    assert_requires("Network", "Project")
 
-    assert_before("Subnet", "Project")
-    assert_before("Subnet", "Network")
+    assert_requires("Subnet", "Project")
+    assert_requires("Subnet", "Network")
 
-    assert_before("Router", "Network")
-    assert_before("Router", "Subnet")
-    assert_before("Router", "Project")
+    assert_requires("Router", "Network")
+    assert_requires("Router", "Subnet")
+    assert_requires("Router", "Project")
 
-    assert_before("VirtualMachine", "Project")
-    assert_before("VirtualMachine", "Subnet")
+    assert_requires("VirtualMachine", "Project")
+    assert_requires("VirtualMachine", "Subnet")
 
-    assert_before("HostPort", "Project")
-    assert_before("HostPort", "VirtualMachine")
+    assert_requires("HostPort", "Project")
+    assert_requires("HostPort", "VirtualMachine")
 
-    assert_before("FloatingIP", "Router")
-    assert_before("FloatingIP", "HostPort")
-    assert_before("FloatingIP", "Network")
+    assert_requires("FloatingIP", "Router")
+    assert_requires("FloatingIP", "HostPort")
+    assert_requires("FloatingIP", "Network")
+
+    assert_requires("VirtualMachine", "SecurityGroup")
+    assert_requires("SecurityGroup","Project")
