@@ -14,7 +14,12 @@ pipeline {
         OS_REGION_NAME='RegionOne'	
         OS_INTERFACE='public'	
         OS_IDENTITY_API_VERSION=3
-    } 
+    }
+
+    triggers {
+        pollSCM('* * * * *')
+        cron("H H(2-5) * * *")
+    }
 
     stages {
         stage('setup venv') {
