@@ -22,6 +22,8 @@ import math
 import os
 import time
 import traceback
+from collections import defaultdict
+from typing import Dict
 
 import keystoneauth1.exceptions
 import novaclient.exceptions
@@ -544,6 +546,7 @@ class FloatingIP(OpenstackResource):
     def get_external_network(_, fip):
         return fip.external_network.name
 
+    @staticmethod
     def get_address(_, fip):
         if fip.force_ip:
             return fip.address
@@ -642,113 +645,108 @@ class EndPoint(KeystoneResource):
     fields = ("region", "internal_url", "public_url", "admin_url", "service_id")
 
 
+MANAGED_DEPENDENCIES = {
+    "openstack::Project",
+    "openstack::Network",
+    "openstack::Router",
+    "openstack::Subnet",
+    "openstack::VirtualMachine",
+    "openstack::HostPort",
+    "openstack::FloatingIP",
+    "openstack::SecurityGroup"
+}
+
+def resource_collector(resource_model):
+    collector = defaultdict(lambda:defaultdict(lambda:{}))
+    
+    for resource in resource_model.values():
+        rtype = resource.id.entity_type
+        if rtype in MANAGED_DEPENDENCIES:
+            provider = resource.model.provider
+            if not resource.purged:
+                collector[provider][rtype][resource.name] = resource
+    
+    return collector
+
 @dependency_manager
 def openstack_dependencies(config_model, resource_model):
-    projects = {}
-    networks = {}
-    routers = {}
-    subnets = {}
-    vms = {}
-    ports = {}
-    fips = {}
-    sgs = {}
+    for project, collector in resource_collector(resource_model).items():
+        openstack_dependencies_for_provider(collector)
+
+def openstack_dependencies_for_provider(collector: Dict[str, OpenstackResource]):
+
+    projects = collector.get("openstack::Project", {})
+    networks = collector.get("openstack::Network", {})
+    routers = collector.get("openstack::Router", {})
+    subnets = collector.get("openstack::Subnet", {})
+    vms = collector.get("openstack::VirtualMachine", {})
+    ports = collector.get("openstack::HostPort", {})
+    fips = collector.get("openstack::FloatingIP", {})
+    sgs = collector.get("openstack::SecurityGroup", {})
     router_map = {}
-
-    for _, res in resource_model.items():
-        if res.id.entity_type == "openstack::Project":
-            if not res.purged:
-                projects[res.name] = res
-
-        elif res.id.entity_type == "openstack::Network":
-            if not res.purged:
-                networks[res.name] = res
-
-        elif res.id.entity_type == "openstack::Router":
-            if not res.purged:
-                routers[res.name] = res
-
-        elif res.id.entity_type == "openstack::Subnet":
-            if not res.purged:
-                subnets[res.name] = res
-
-        elif res.id.entity_type == "openstack::VirtualMachine":
-            if not res.purged:
-                vms[res.name] = res
-
-        elif res.id.entity_type == "openstack::HostPort":
-            if not res.purged:
-                ports[res.name] = res
-
-        elif res.id.entity_type == "openstack::FloatingIP":
-            if not res.purged:
-                fips[res.name] = res
-
-        elif res.id.entity_type == "openstack::SecurityGroup":
-            if not res.purged:
-                sgs[res.name] = res
 
     # they require the tenant to exist
     for network in networks.values():
         if network.model.project.name in projects:
-            network.requires.add(projects[network.model.project.name])
+            network.requires.add(projects[network.model.project.name].id)
 
     for router in routers.values():
         if router.model.project.name in projects:
-            router.requires.add(projects[router.model.project.name])
+            router.requires.add(projects[router.model.project.name].id)
 
         # depend on the attached subnets
         for subnet_name in router.subnets:
             if subnet_name in subnets:
-                router.requires.add(subnets[subnet_name])
+                router.requires.add(subnets[subnet_name].id)
 
             # create external/subnet mapping
             router_map[(router.gateway, subnet_name)] = router
 
         if router.gateway in networks:
-            router.requires.add(networks[router.gateway])
+            router.requires.add(networks[router.gateway].id)
 
     for subnet in subnets.values():
         if subnet.model.project.name in projects:
-            subnet.requires.add(projects[subnet.model.project.name])
+            subnet.requires.add(projects[subnet.model.project.name].id)
 
         # also require the network it is attached to
         if subnet.model.network.name in networks:
-            subnet.requires.add(networks[subnet.model.network.name])
+            subnet.requires.add(networks[subnet.model.network.name].id)
 
     for vm in vms.values():
         if vm.model.project.name in projects:
-            vm.requires.add(projects[vm.model.project.name])
+            vm.requires.add(projects[vm.model.project.name].id)
 
         for port in vm.ports:
             if port["network"] in subnets:
-                vm.requires.add(subnets[port["network"]])
+                vm.requires.add(subnets[port["network"]].id)
 
         for sg in vm.security_groups:
             if sg in sgs:
-                vm.requires.add(sgs[sg])
+                vm.requires.add(sgs[sg].id)
 
     for port in ports.values():
         if port.model.project.name in projects:
-            port.requires.add(projects[port.model.project.name])
+            port.requires.add(projects[port.model.project.name].id)
 
         if port.network in projects:
-            port.requires.add(subnets[port.network])
+            port.requires.add(subnets[port.network].id)
 
         if port.host in vms:
-            port.requires.add(vms[port.host])
+            port.requires.add(vms[port.host].id)
 
     for fip in fips.values():
         if fip.external_network in networks:
-            fip.requires.add(networks[fip.external_network])
+            fip.requires.add(networks[fip.external_network].id)
 
         if fip.port in ports:
             port = ports[fip.port]
-            fip.requires.add(port)
+            fip.requires.add(port.id)
 
             # find router on which this floating ip is added
             key = (fip.external_network, port.subnet)
             if key in router_map:
-                fip.requires.add(router_map[key])
+                fip.requires.add(router_map[key].id)
 
 
 CRED_TIMEOUT = 600
