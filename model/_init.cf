@@ -381,7 +381,7 @@ entity VMAttributes extends platform::UserdataVM:
     """
         Entity with vm attributes that can be used for a virtual machine and a host
 
-        :param flavor: The uuid of the flavor
+        :param flavor: The name of the flavor
         :param image: The uuid of the image
         :param user_data: The user_data script to pass
         :param metadata: A dict of metadata items
