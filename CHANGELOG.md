@@ -1,3 +1,8 @@
+# 3.4.0
+- set gateway_ip on subnet by default to null
+- fix caching of find_image when name is used
+- close requests session of keystone library
+
 # 3.3.2
 - fixed dependency manager mixing up identical objects in different providers (#48)
 

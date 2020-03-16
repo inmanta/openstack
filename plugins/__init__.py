@@ -84,10 +84,12 @@ def find_image(
     """
     global FIND_IMAGE_RESULT
 
-    ident = (provider.name, os.name.lower(), str(os.version).lower())
+    ident = (provider.name, os.name.lower(), str(os.version).lower(), name)
     if ident in FIND_IMAGE_RESULT:
         return FIND_IMAGE_RESULT[ident]
 
+    sess = None
+    client = None
     try:
         global IMAGES
         if provider.name not in IMAGES:
@@ -103,37 +105,40 @@ def find_image(
             client = glance_client.Client("2", session=sess)
 
             IMAGES[provider.name] = list(client.images.list())
+
+        selected = (datetime.datetime(1900, 1, 1), None)
+        for image in IMAGES[provider.name]:
+            # only images that are public
+            if (
+                ("image_location" not in image and image["visibility"] == "public")
+                and ("os_distro" in image and "os_version" in image)
+                and (
+                    image["os_distro"].lower() == os.name.lower()
+                    and image["os_version"].lower() == str(os.version).lower()
+                )
+                and (name is None or name in image["name"])
+            ):
+                t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+                if t > selected[0]:
+                    selected = (t, image)
+
+        if selected[1] is None:
+            raise Exception(
+                "No image found for os %s and version %s" % (os.name, os.version)
+            )
+
+        result = selected[1]["id"]
+        FIND_IMAGE_RESULT[ident] = result
+        return result
     except keystoneauth1.exceptions.http.Unauthorized:
         # Make sure that the model compiles when the tenant has not been created yet
         return Unknown(None)
     except keystoneauth1.exceptions.connection.ConnectFailure:
         # Make sure that the model compiles when the openstack instance is down
         return Unknown(None)
-
-    selected = (datetime.datetime(1900, 1, 1), None)
-    for image in IMAGES[provider.name]:
-        # only images that are public
-        if (
-            ("image_location" not in image and image["visibility"] == "public")
-            and ("os_distro" in image and "os_version" in image)
-            and (
-                image["os_distro"].lower() == os.name.lower()
-                and image["os_version"].lower() == str(os.version).lower()
-            )
-            and (name is None or name in image["name"])
-        ):
-            t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
-            if t > selected[0]:
-                selected = (t, image)
-
-    if selected[1] is None:
-        raise Exception(
-            "No image found for os %s and version %s" % (os.name, os.version)
-        )
-
-    result = selected[1]["id"]
-    FIND_IMAGE_RESULT[ident] = result
-    return result
+    finally:
+        if sess is not None:
+            sess.session.close()
 
 
 FLAVORS = {}
@@ -161,8 +166,9 @@ def find_flavor(
     if ident in FIND_FLAVOR_RESULT:
         return FIND_FLAVOR_RESULT[ident]
 
-    if provider.name not in FLAVORS:
-        try:
+    sess = None
+    try:
+        if provider.name not in FLAVORS:
             auth = v3.Password(
                 auth_url=provider.connection_url,
                 username=provider.username,
@@ -175,28 +181,32 @@ def find_flavor(
             client = nova_client.Client("2.1", session=sess)
 
             FLAVORS[provider.name] = list(client.flavors.list())
-        except keystoneauth1.exceptions.http.Unauthorized:
-            # Make sure that the model compiles when the tenant has not been created yet
-            return Unknown(None)
-        except keystoneauth1.exceptions.connection.ConnectFailure:
-            # Make sure that the model compiles when the openstack instance is down
-            return Unknown(None)
 
-    selected = (1000000, None)
-    for flavor in FLAVORS[provider.name]:
-        keys = flavor.get_keys()
-        is_pinned = "hw:cpu_policy" in keys and keys["hw:cpu_policy"] == "dedicated"
-        if is_pinned ^ pinned:
-            continue
 
-        d_cpu = flavor.vcpus - vcpus
-        d_ram = (flavor.ram / 1024) - ram
-        distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
-        if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
-            selected = (distance, flavor)
+        selected = (1000000, None)
+        for flavor in FLAVORS[provider.name]:
+            keys = flavor.get_keys()
+            is_pinned = "hw:cpu_policy" in keys and keys["hw:cpu_policy"] == "dedicated"
+            if is_pinned ^ pinned:
+                continue
 
-    FIND_FLAVOR_RESULT[ident] = selected[1].name
-    return selected[1].name
+            d_cpu = flavor.vcpus - vcpus
+            d_ram = (flavor.ram / 1024) - ram
+            distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
+            if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
+                selected = (distance, flavor)
+
+        FIND_FLAVOR_RESULT[ident] = selected[1].name
+        return selected[1].name
+    except keystoneauth1.exceptions.http.Unauthorized:
+        # Make sure that the model compiles when the tenant has not been created yet
+        return Unknown(None)
+    except keystoneauth1.exceptions.connection.ConnectFailure:
+        # Make sure that the model compiles when the openstack instance is down
+        return Unknown(None)
+    finally:
+        if sess is not None:
+            sess.session.close()
 
 
 class OpenstackAdminResource(PurgeableResource, ManagedResource):
