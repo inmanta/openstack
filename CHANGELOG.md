@@ -1,3 +1,6 @@
+# 3.4.1
+- use new relation syntax (#65)
+
 # 3.4.0
 - set gateway_ip on subnet by default to null
 - fix caching of find_image when name is used

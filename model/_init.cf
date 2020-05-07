@@ -139,7 +139,7 @@ entity Service extends OpenStackResource:
     string description
 end
 implement Service using providerRequire
-Service services [0:] -- [1] Provider provider
+Service.provider [1] -- Provider.services [0:]
 index Service(provider, name, type)
 
 entity EndPoint extends OpenStackResource:
@@ -175,8 +175,8 @@ entity Network extends OpenStackResource:
     bool? vlan_transparent=null
 end
 
-Network networks [0:] -- [1] Provider provider
-Project project [1] -- [0:] Network networks
+Network.provider [1] -- Provider.networks [0:]
+Project.networks [0:] -- Network.project [1]
 
 index Network(provider, name)
 
@@ -322,9 +322,9 @@ implementation sg for SecurityGroup:
     self.requires = self.project
 end
 
-SecurityGroup security_groups [0:] -- [1] Provider provider
-SecurityGroup security_groups [0:] -- [1] Project project
-SecurityGroup security_groups [0:] -- [0:] VirtualMachine virtual_machines
+SecurityGroup.provider [1] -- Provider.security_groups [0:]
+SecurityGroup.project [1] -- Project.security_groups [0:]
+SecurityGroup.virtual_machines [0:] -- VirtualMachine.security_groups [0:]
 
 entity SecurityRule:
     """
@@ -346,12 +346,12 @@ end
 entity GroupRule extends SecurityRule:
 end
 
-GroupRule remote_group_rules [0:] -- [1] SecurityGroup remote_group
+GroupRule.remote_group [1] -- SecurityGroup.remote_group_rules [0:]
 
 implement IPrule using std::none
 implement GroupRule using std::none
 
-SecurityRule rules [0:] -- [1] SecurityGroup group
+SecurityRule.group [1] -- SecurityGroup.rules [0:]
 
 entity FloatingIP extends OpenStackResource:
     string name
@@ -372,10 +372,10 @@ end
 implement FloatingIP using fipName, providerRequire
 implement FloatingIP using fipAddr when not force_ip
 
-FloatingIP floating_ips [0:] -- [1] Project project
-FloatingIP floating_ips [0:] -- [1] Provider provider
-FloatingIP floating_ips [0:] -- [1] Network external_network
-FloatingIP floating_ips [0:] -- [1] HostPort port
+FloatingIP.project [1] -- Project.floating_ips [0:]
+FloatingIP.provider [1] -- Provider.floating_ips [0:]
+FloatingIP.external_network [1] -- Network.floating_ips [0:]
+FloatingIP.port [1] -- HostPort.floating_ips [0:]
 
 entity VMAttributes extends platform::UserdataVM:
     """
