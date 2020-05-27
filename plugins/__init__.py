@@ -373,6 +373,7 @@ class Subnet(OpenstackResource):
         "network",
         "dns_servers",
         "gateway_ip",
+        "disable_gateway_ip",
     )
 
     @staticmethod
@@ -668,14 +669,14 @@ MANAGED_DEPENDENCIES = {
 
 def resource_collector(resource_model):
     collector = defaultdict(lambda:defaultdict(lambda:{}))
-    
+
     for resource in resource_model.values():
         rtype = resource.id.entity_type
         if rtype in MANAGED_DEPENDENCIES:
             provider = resource.model.provider
             if not resource.purged:
                 collector[provider][rtype][resource.name] = resource
-    
+
     return collector
 
 @dependency_manager
@@ -1814,7 +1815,9 @@ class SubnetHandler(OpenStackHandler):
                 resource.allocation_start = pool["start"]
                 resource.allocation_end = pool["end"]
 
-            if resource.gateway_ip is not None:
+            resource.disable_gateway_ip = neutron_version["gateway_ip"] is None
+            if not resource.disable_gateway_ip and resource.gateway_ip is not None:
+                # A gateway_ip was set explicitly in the model
                 resource.gateway_ip = neutron_version["gateway_ip"]
 
             ctx.set("neutron", neutron_version)
@@ -1853,8 +1856,14 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
 
-        if resource.gateway_ip is not None:
+        if resource.disable_gateway_ip:
+            body["gateway_ip"] = None
+        elif resource.gateway_ip is not None:
             body["gateway_ip"] = resource.gateway_ip
+        else:
+            # Not adding the gateway_ip to the json body, will set
+            # the gateway_ip to the first IP in the network.
+            pass
 
         self._neutron.create_subnet({"subnet": body})
         ctx.set_created()
@@ -1884,7 +1893,9 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
 
-        if resource.gateway_ip is not None:
+        if resource.disable_gateway_ip:
+            body["gateway_ip"] = None
+        else:
             body["gateway_ip"] = resource.gateway_ip
 
         self._neutron.update_subnet(neutron["id"], body)
