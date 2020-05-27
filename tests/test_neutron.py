@@ -682,14 +682,14 @@ def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     n = openstack::Network(provider=p, name="{net_name}", project=project)
     subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="{subnet_name}",
                                network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"],
-                               gateway_ip={gateway_ip_model}, disable_gateway_ip={disable_gateway_ip})
+                               gateway_ip={gateway_ip_model}, disable_gateway_ip={str(disable_gateway_ip).lower()})
             """
     )
 
     project.deploy_resource("openstack::Network", name=net_name)
 
     # Check initial state
-    changes = project.dryrun_resource("openstack::Subnet", name=net_name)
+    changes = project.dryrun_resource("openstack::Subnet", name=subnet_name)
     assert changes
 
     # Deploy subnet
@@ -701,12 +701,12 @@ def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     subnet = subnets[0]
     if disable_gateway_ip:
         assert subnet["gateway_ip"] is None
-    elif gateway_ip == "null":
+    elif gateway_ip is None:
         # The first IP of the subnet should be set
         assert subnet["gateway_ip"] == "10.255.255.1"
     else:
         assert subnet["gateway_ip"] == gateway_ip
 
     # Ensure convergence
-    changes = project.dryrun_resource("openstack::Subnet", name=net_name)
+    changes = project.dryrun_resource("openstack::Subnet", name=subnet_name)
     assert not changes
