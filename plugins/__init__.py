@@ -118,7 +118,9 @@ def find_image(
                 )
                 and (name is None or name in image["name"])
             ):
-                t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+                t = datetime.datetime.strptime(
+                    image["updated_at"], "%Y-%m-%dT%H:%M:%SZ"
+                )
                 if t > selected[0]:
                     selected = (t, image)
 
@@ -181,7 +183,6 @@ def find_flavor(
             client = nova_client.Client("2.1", session=sess)
 
             FLAVORS[provider.name] = list(client.flavors.list())
-
 
         selected = (1000000, None)
         for flavor in FLAVORS[provider.name]:
@@ -664,25 +665,28 @@ MANAGED_DEPENDENCIES = {
     "openstack::VirtualMachine",
     "openstack::HostPort",
     "openstack::FloatingIP",
-    "openstack::SecurityGroup"
+    "openstack::SecurityGroup",
 }
 
-def resource_collector(resource_model):
-    collector = defaultdict(lambda:defaultdict(lambda:{}))
 
-    for resource in resource_model.values():
-        rtype = resource.id.entity_type
+def resource_collector(resource_model):
+    collector = defaultdict(lambda: defaultdict(lambda: {}))
+
+    for current_resource in resource_model.values():
+        rtype = current_resource.id.entity_type
         if rtype in MANAGED_DEPENDENCIES:
-            provider = resource.model.provider
-            if not resource.purged:
-                collector[provider][rtype][resource.name] = resource
+            provider = current_resource.model.provider
+            if not current_resource.purged:
+                collector[provider][rtype][current_resource.name] = current_resource
 
     return collector
+
 
 @dependency_manager
 def openstack_dependencies(config_model, resource_model):
     for project, collector in resource_collector(resource_model).items():
         openstack_dependencies_for_provider(collector)
+
 
 def openstack_dependencies_for_provider(collector: Dict[str, OpenstackResource]):
 

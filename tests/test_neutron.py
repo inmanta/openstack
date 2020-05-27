@@ -17,7 +17,6 @@
 """
 import inmanta
 import pytest
-from typing import Optional
 
 
 def test_net(project, neutron):
@@ -656,11 +655,15 @@ def test_allowed_addr_port(project, openstack):
     project.deploy_resource("openstack::HostPort", name=port_name)
 
 
-@pytest.mark.parametrize("disable_gateway_ip,gateway_ip", [(False, None),
-                                                           (False, "10.255.255.27"),
-                                                           (True, None),
-                                                           (True, "10.255.255.111")  # Should not be used in practice,
-                                                           ])                        # disable_gateway_ip takes precedence.
+@pytest.mark.parametrize(
+    "disable_gateway_ip,gateway_ip",
+    [
+        (False, None),
+        (False, "10.255.255.27"),
+        (True, None),
+        (True, "10.255.255.111"),  # Should not be used in practice. disable_gateway_ip takes precedence.
+    ],
+)
 def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     """
         Test whether the gateway_ip and the disable_gateway_ip settings of a subnet work correctly.

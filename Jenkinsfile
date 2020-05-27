@@ -89,7 +89,7 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        ${WORKSPACE}/env/bin/flake8 ${WORKSPACE}/plugins ${WORKSPACE}/tests
+                        ${WORKSPACE}/env/bin/flake8 ${WORKSPACE}/openstack/plugins ${WORKSPACE}/openstack/tests
                     '''
                 }
             }
