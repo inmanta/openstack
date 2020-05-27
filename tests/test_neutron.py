@@ -661,7 +661,10 @@ def test_allowed_addr_port(project, openstack):
         (False, None),
         (False, "10.255.255.27"),
         (True, None),
-        (True, "10.255.255.111"),  # Should not be used in practice. disable_gateway_ip takes precedence.
+        (  # Should not be used in practice. disable_gateway_ip takes precedence.
+            True,
+            "10.255.255.111",
+        ),
     ],
 )
 def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
