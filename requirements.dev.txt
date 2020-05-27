@@ -1,4 +1,4 @@
-pytest-inmanta==1.1.0
+pytest-inmanta==1.2.0
 flake8==3.7.9
 flake8-black==0.2.0
 flake8-isort==3.0.0
