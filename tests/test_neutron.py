@@ -100,6 +100,7 @@ def test_subnet(project, neutron):
 
         os_subnet = subnets[0]
         assert len(os_subnet["dns_nameservers"]) == 2
+        assert os_subnet["gateway_ip"] == "10.255.255.1"
 
         project.compile(
             """
@@ -652,3 +653,66 @@ def test_allowed_addr_port(project, openstack):
 
     # recheck the config
     project.deploy_resource("openstack::HostPort", name=port_name)
+
+
+@pytest.mark.parametrize(
+    "disable_gateway_ip,gateway_ip",
+    [
+        (False, None),
+        (False, "10.255.255.27"),
+        (True, None),
+        (  # Should not be used in practice. disable_gateway_ip takes precedence.
+            True,
+            "10.255.255.111",
+        ),
+    ],
+)
+def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
+    """
+        Test whether the gateway_ip and the disable_gateway_ip settings of a subnet work correctly.
+    """
+    tenant1 = openstack.get_project("tenant1")
+    net_name = tenant1.get_resource_name("net")
+    subnet_name = tenant1.get_resource_name("subnet")
+
+    gateway_ip_model = f'"{gateway_ip}"' if gateway_ip is not None else "null"
+    project.compile(
+        f"""
+    import unittest
+    import openstack
+
+    tenant = "{tenant1._tenant}"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="{net_name}", project=project)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="{subnet_name}",
+                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"],
+                               gateway_ip={gateway_ip_model}, disable_gateway_ip={str(disable_gateway_ip).lower()})
+            """
+    )
+
+    project.deploy_resource("openstack::Network", name=net_name)
+
+    # Check initial state
+    changes = project.dryrun_resource("openstack::Subnet", name=subnet_name)
+    assert changes
+
+    # Deploy subnet
+    project.deploy_resource("openstack::Subnet", name=subnet_name)
+
+    # Verify state on Openstack
+    subnets = tenant1.neutron.list_subnets(name=subnet_name)["subnets"]
+    assert len(subnets) == 1
+    subnet = subnets[0]
+    if disable_gateway_ip:
+        assert subnet["gateway_ip"] is None
+    elif gateway_ip is None:
+        # The first IP of the subnet should be set
+        assert subnet["gateway_ip"] == "10.255.255.1"
+    else:
+        assert subnet["gateway_ip"] == gateway_ip
+
+    # Ensure convergence
+    changes = project.dryrun_resource("openstack::Subnet", name=subnet_name)
+    assert not changes

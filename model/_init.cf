@@ -249,6 +249,11 @@ index HostPort(provider, vm, name)
 entity Subnet extends OpenStackResource:
     """
         A neutron network subnet
+
+        :attr gateway_ip: The gateway IP to set on this subnet. If set to null, the first IP in the subnet will be used
+                          as the gateway_ip. Example: 192.168.0.1 will be used for the network 192.168.0.0/24.
+        :attr disable_gateway_ip: When set to true, no gateway IP will be set for the subnet. As such,
+                                  the gateway_ip parameter will be ignored.
     """
     ip::cidr network_address
     bool dhcp
@@ -257,6 +262,7 @@ entity Subnet extends OpenStackResource:
     string allocation_end=""
     ip::ip[] dns_servers=[]
     ip::ip? gateway_ip=null
+    bool disable_gateway_ip=false
 end
 
 implement Subnet using providerRequire

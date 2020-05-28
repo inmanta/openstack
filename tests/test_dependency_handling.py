@@ -1,7 +1,7 @@
 from inmanta.resources import Id
 
-all_model="""
-import openstack 
+all_model = """
+import openstack
 import ssh
 entity AllFor:
     string name
@@ -18,7 +18,14 @@ implementation allfor for AllFor:
     key = ssh::Key(name="mykey", public_key="AAAAAAAAAAAAa")
     project = openstack::Project(provider=p, name=name, description="", enabled=true)
     net = openstack::Network(provider=p, project=project, name="mynet")
-    subnet = openstack::Subnet(provider=p, project=project, network=net, dhcp=true, name="mysub", network_address="10.255.255.0/24")
+    subnet = openstack::Subnet(
+        provider=p,
+        project=project,
+        network=net,
+        dhcp=true,
+        name="mysub",
+        network_address="10.255.255.0/24"
+    )
     vm = openstack::Host(
         provider=p,
         project=project,
@@ -38,23 +45,25 @@ implementation allfor for AllFor:
                       ext_gateway=net
                       )
     fip = openstack::FloatingIP(
-        provider=p, 
+        provider=p,
         project=project,
         external_network=net,
-        port=vm.vm.eth0_port, 
-    ) 
+        port=vm.vm.eth0_port,
+    )
 
     sg = openstack::SecurityGroup(
-        provider=p, 
+        provider=p,
         project=project,
         name="sg1"
     )
 end
 """
 
+
 def test_dependency_handling(project):
     project.compile(
-        all_model+"""
+        all_model
+        + """
 
             AllFor(name="t1")
             AllFor(name="t2")
@@ -63,22 +72,21 @@ def test_dependency_handling(project):
 
     # no leakage between providers
     for name, resource in project.resources.items():
-        if not "openstack" in name.get_entity_type():
+        if "openstack" not in name.get_entity_type():
             continue
         agentname = name.get_agent_name()
-        for r in resource.requires: 
-            #ensure clean typing
+        for r in resource.requires:
+            # ensure clean typing
             assert isinstance(r, Id)
-            if not "openstack" in r.get_entity_type():
+            if "openstack" not in r.get_entity_type():
                 continue
             assert agentname == r.get_agent_name()
 
     def assert_requires(typea, typeb, tenant="t1"):
-        for tenant in ["t1","t2"]:
+        for tenant in ["t1", "t2"]:
             a = project.get_resource(f"openstack::{typea}", admin_user=tenant)
             b = project.get_resource(f"openstack::{typeb}", admin_user=tenant)
             assert b.id in a.requires
-
 
     assert_requires("Network", "Project")
 
@@ -100,4 +108,4 @@ def test_dependency_handling(project):
     assert_requires("FloatingIP", "Network")
 
     assert_requires("VirtualMachine", "SecurityGroup")
-    assert_requires("SecurityGroup","Project")
+    assert_requires("SecurityGroup", "Project")

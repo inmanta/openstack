@@ -1,3 +1,6 @@
+# 3.5.0
+- Added support to disable the gateway IP of a subnet
+
 # 3.4.1
 - use new relation syntax (#65)
 

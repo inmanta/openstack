@@ -118,7 +118,9 @@ def find_image(
                 )
                 and (name is None or name in image["name"])
             ):
-                t = datetime.datetime.strptime(image["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+                t = datetime.datetime.strptime(
+                    image["updated_at"], "%Y-%m-%dT%H:%M:%SZ"
+                )
                 if t > selected[0]:
                     selected = (t, image)
 
@@ -181,7 +183,6 @@ def find_flavor(
             client = nova_client.Client("2.1", session=sess)
 
             FLAVORS[provider.name] = list(client.flavors.list())
-
 
         selected = (1000000, None)
         for flavor in FLAVORS[provider.name]:
@@ -373,6 +374,7 @@ class Subnet(OpenstackResource):
         "network",
         "dns_servers",
         "gateway_ip",
+        "disable_gateway_ip",
     )
 
     @staticmethod
@@ -663,25 +665,28 @@ MANAGED_DEPENDENCIES = {
     "openstack::VirtualMachine",
     "openstack::HostPort",
     "openstack::FloatingIP",
-    "openstack::SecurityGroup"
+    "openstack::SecurityGroup",
 }
 
+
 def resource_collector(resource_model):
-    collector = defaultdict(lambda:defaultdict(lambda:{}))
-    
-    for resource in resource_model.values():
-        rtype = resource.id.entity_type
+    collector = defaultdict(lambda: defaultdict(lambda: {}))
+
+    for current_resource in resource_model.values():
+        rtype = current_resource.id.entity_type
         if rtype in MANAGED_DEPENDENCIES:
-            provider = resource.model.provider
-            if not resource.purged:
-                collector[provider][rtype][resource.name] = resource
-    
+            provider = current_resource.model.provider
+            if not current_resource.purged:
+                collector[provider][rtype][current_resource.name] = current_resource
+
     return collector
+
 
 @dependency_manager
 def openstack_dependencies(config_model, resource_model):
     for project, collector in resource_collector(resource_model).items():
         openstack_dependencies_for_provider(collector)
+
 
 def openstack_dependencies_for_provider(collector: Dict[str, OpenstackResource]):
 
@@ -1814,7 +1819,9 @@ class SubnetHandler(OpenStackHandler):
                 resource.allocation_start = pool["start"]
                 resource.allocation_end = pool["end"]
 
-            if resource.gateway_ip is not None:
+            resource.disable_gateway_ip = neutron_version["gateway_ip"] is None
+            if not resource.disable_gateway_ip and resource.gateway_ip is not None:
+                # A gateway_ip was set explicitly in the model
                 resource.gateway_ip = neutron_version["gateway_ip"]
 
             ctx.set("neutron", neutron_version)
@@ -1853,8 +1860,14 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
 
-        if resource.gateway_ip is not None:
+        if resource.disable_gateway_ip:
+            body["gateway_ip"] = None
+        elif resource.gateway_ip is not None:
             body["gateway_ip"] = resource.gateway_ip
+        else:
+            # Not adding the gateway_ip to the json body, will set
+            # the gateway_ip to the first IP in the network.
+            pass
 
         self._neutron.create_subnet({"subnet": body})
         ctx.set_created()
@@ -1884,7 +1897,9 @@ class SubnetHandler(OpenStackHandler):
         if len(resource.dns_servers) > 0:
             body["dns_nameservers"] = resource.dns_servers
 
-        if resource.gateway_ip is not None:
+        if resource.disable_gateway_ip:
+            body["gateway_ip"] = None
+        else:
             body["gateway_ip"] = resource.gateway_ip
 
         self._neutron.update_subnet(neutron["id"], body)
