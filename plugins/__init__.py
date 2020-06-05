@@ -331,7 +331,7 @@ class VirtualMachine(OpenstackResource):
             }
             try:
                 port["address"] = p.address
-            except proxy.UnknownException:
+            except (proxy.UnknownException, ast.OptionalValueException):
                 pass
             ports.append(port)
 
@@ -434,7 +434,7 @@ class Port(OpenstackResource):
     def get_address(exporter, port):
         try:
             return port.address
-        except proxy.UnknownException:
+        except (proxy.UnknownException, ast.OptionalValueException):
             return ""
 
     @staticmethod
@@ -2201,7 +2201,7 @@ class HostPortHandler(OpenStackHandler):
                 }
             }
 
-            if resource.address != "" and not resource.dhcp:
+            if resource.address:
                 body_value["port"]["fixed_ips"] = [
                     {"subnet_id": subnet["id"], "ip_address": resource.address}
                 ]

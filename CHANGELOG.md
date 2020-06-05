@@ -1,3 +1,6 @@
+# 3.6.0
+- Make address attribute of HostPort optional
+
 # 3.5.0
 - Added support to disable the gateway IP of a subnet
 

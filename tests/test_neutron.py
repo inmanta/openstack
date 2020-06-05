@@ -716,3 +716,131 @@ def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     # Ensure convergence
     changes = project.dryrun_resource("openstack::Subnet", name=subnet_name)
     assert not changes
+
+
+@pytest.mark.parametrize(
+    "port_a_dhcp, port_a_address",
+    [
+        (False, "10.10.10.10"),  # Use given address (Ensure backwards compatibility)
+        (False, None),  # Get address via DHCP
+        (True, "10.10.10.10"),  # Use given address (Ensure backwards compatibility)
+        (True, None),  # Get address via DHCP
+    ],
+)
+def test_hostport_address_nullable(project, openstack, port_a_dhcp, port_a_address):
+    """
+        The address attribute of a HostPort was made nullable. This test case verifies:
+            * The HostPort behavior when address is set to null.
+            * That the behavior of HostPort remains backwards compatible.
+    """
+    tenant1 = openstack.get_project("tenant1")
+    key_name = tenant1.get_resource_name("key")
+    server_a_name = tenant1.get_resource_name("server_a").replace("_", "-")
+    server_b_name = tenant1.get_resource_name("server_b").replace("_", "-")
+    net_name = tenant1.get_resource_name("net")
+    subnet_name = tenant1.get_resource_name("subnet")
+    port_a = tenant1.get_resource_name("port_a")
+    port_b = tenant1.get_resource_name("port_b")
+
+    port_a_address_model = (
+        f'"{port_a_address}"' if port_a_address is not None else "null"
+    )
+    model = f"""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "{tenant1._tenant}"
+    p = openstack::Provider(
+        name="test",
+        connection_url=std::get_env("OS_AUTH_URL"),
+        username=std::get_env("OS_USERNAME"),
+        password=std::get_env("OS_PASSWORD"),
+        tenant=tenant,
+    )
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    net = openstack::Network(provider=p, name="{net_name}", project=project)
+    subnet = openstack::Subnet(
+        provider=p,
+        project=project,
+        network=net,
+        dhcp=true,
+        name="{subnet_name}",
+        network_address="10.10.10.0/24",
+        dns_servers=["8.8.8.8", "8.8.4.4"]
+    )
+
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
+    key = ssh::Key(name="{key_name}", public_key="")
+
+    vm_a = openstack::VirtualMachine(
+        provider=p,
+        project=project,
+        key_pair=key,
+        name="{server_a_name}",
+        image=openstack::find_image(p, os),
+        flavor=openstack::find_flavor(p, 1, 0.5),
+        user_data="",
+        eth0_port = port_a
+    )
+
+    port_a = openstack::HostPort(
+        provider=p,
+        project=project,
+        name="{port_a}",
+        subnet=subnet,
+        dhcp={str(port_a_dhcp).lower()},
+        address={port_a_address_model},
+        vm=vm_a
+    )
+    """
+
+    if port_a_address is None:
+        # Make sure that address 10.10.10.10 is already allocated.
+        model += f"""
+    vm_b = openstack::VirtualMachine(
+        provider=p,
+        project=project,
+        key_pair=key,
+        name="{server_b_name}",
+        image=openstack::find_image(p, os),
+        flavor=openstack::find_flavor(p, 1, 0.5),
+        user_data="",
+        eth0_port = port_b
+    )
+
+    port_b = openstack::HostPort(
+        provider=p, project=project, name="{port_b}", subnet=subnet, dhcp=false, address="10.10.10.10", vm=vm_b,
+    )
+        """
+
+    project.compile(model)
+
+    # Execute deployment
+    project.deploy_resource("openstack::Network", name=net_name)
+    project.deploy_resource("openstack::Subnet", name=subnet_name)
+    if port_a_address is None:
+        project.deploy_resource("openstack::VirtualMachine", name=server_b_name)
+        project.deploy_resource("openstack::HostPort", name=port_b)
+    project.deploy_resource("openstack::VirtualMachine", name=server_a_name)
+    project.deploy_resource("openstack::HostPort", name=port_a)
+
+    # Verify port configuration
+    ports = tenant1.neutron.list_ports(name=port_a)["ports"]
+    assert len(ports) == 1
+    port = ports[0]
+    assert len(port["fixed_ips"]) == 1
+    if port_a_address is None:
+        assert port["fixed_ips"][0]["ip_address"] != "10.10.10.10"
+    else:
+        assert port["fixed_ips"][0]["ip_address"] == port_a_address
+
+    ip_port = port["fixed_ips"][0]["ip_address"]
+
+    # Verify VM configuration
+    servers = tenant1.nova.servers.find(name=server_a_name)
+    network_to_addresses_dct = servers.networks
+    assert len(network_to_addresses_dct) == 1
+    assert net_name in network_to_addresses_dct
+    addresses = network_to_addresses_dct[net_name]
+    assert addresses == [ip_port]

@@ -186,7 +186,6 @@ entity Port extends OpenStackResource:
     """
         A port on a network
     """
-    ip::ip address
 end
 
 entity AddressPair:
@@ -211,6 +210,7 @@ entity RouterPort extends Port:
         A port attached to a router
     """
     string name
+    ip::ip address
 end
 
 index RouterPort(router, subnet)
@@ -224,14 +224,17 @@ entity HostPort extends Port:
         A port attached to a VM
 
         :param name: The name of the host port.
+        :param address: The IP address that should be assigned to the port.
+                       When set to null, the address will be allocated via DHCP.
         :param portsecurity: Enable or disable port security (security groups and spoofing filters)
-        :param dhcp: Enable dhcp for this port or not for this port
+        :param dhcp: [DEPRECATED] Enable dhcp for this port or not for this port.
         :param port_index: The index of the port. This determines the order of the interfaces on the virtual machine. 0 means no specific order.
         :param retries: A hostport can only be attached to a VM when it is in an active state. The handler will skip this port when the VM is not ready. To
                         speed up deployments, the handler can retry this number of times before skipping the resource.
         :param wait: The number of seconds to wait between retries.
     """
     string name
+    ip::ip? address=null
     bool portsecurity=true
     bool dhcp=true
     number port_index=0
