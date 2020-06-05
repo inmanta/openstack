@@ -716,3 +716,77 @@ def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     # Ensure convergence
     changes = project.dryrun_resource("openstack::Subnet", name=subnet_name)
     assert not changes
+
+
+def test_issue_7(project, openstack):
+    tenant1 = openstack.get_project("tenant1")
+    net_name = tenant1.get_resource_name("net")
+    port_name = tenant1.get_resource_name("port")
+    key_name = tenant1.get_resource_name("key")
+    server_name = tenant1.get_resource_name("server").replace("_", "-")
+
+    def _get_model(purged: bool) -> str:
+        return f"""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "{tenant1._tenant}"
+    p = openstack::Provider(
+        name="test",
+        connection_url=std::get_env("OS_AUTH_URL"),
+        username=std::get_env("OS_USERNAME"),
+        password=std::get_env("OS_PASSWORD"),
+        tenant=tenant
+    )
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="{net_name}", project=project)
+    subnet = openstack::Subnet(
+        provider=p,
+        project=project,
+        network=n,
+        dhcp=true,
+        name="{net_name}",
+        network_address="10.255.255.0/24",
+        dns_servers=["8.8.8.8", "8.8.4.4"],
+        purged={str(purged).lower()},
+    )
+
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
+    key = ssh::Key(name="{key_name}", public_key="")
+
+    vm = openstack::VirtualMachine(
+        provider=p,
+        project=project,
+        key_pair=key,
+        name="{server_name}",
+        image=openstack::find_image(p, os),
+        flavor=openstack::find_flavor(p, 1, 0.5),
+        user_data="",
+        purged={str(purged).lower()},
+    )
+
+    port = openstack::HostPort(
+        provider=p,
+        project=project,
+        name="{port_name}",
+        subnet=subnet,
+        address="10.255.255.10",
+        dhcp=false,
+        vm=vm,
+        retries=1,
+        wait=0,
+        purged={str(purged).lower()},
+    )
+    vm.eth0_port = port
+            """
+
+    project.compile(_get_model(purged=False))
+    project.deploy_resource("openstack::Network", name=net_name)
+    project.deploy_resource("openstack::Subnet", name=net_name)
+    # HostPort doesn't have VM so it will be skipped, but shouldn't fail.
+    project.deploy_resource(
+        "openstack::HostPort",
+        name=port_name,
+        status=inmanta.const.ResourceState.skipped,
+    )
