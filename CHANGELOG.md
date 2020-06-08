@@ -1,3 +1,6 @@
+# 3.5.1
+- Fix problem where the vm_state variable is referenced before assignment
+
 # 3.5.0
 - Added support to disable the gateway IP of a subnet
 

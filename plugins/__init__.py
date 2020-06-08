@@ -2101,11 +2101,16 @@ class HostPortHandler(OpenStackHandler):
                 vm_state = getattr(vm, "OS-EXT-STS:vm_state")
                 if vm_state == "active":
                     return vm
+                else:
+                    ctx.info(
+                        "VM for port is not in active state, but %(state)s. Waiting and retrying in 5 seconds.",
+                        state=vm_state,
+                    )
+            else:
+                ctx.info(
+                    "VM for port doesn't exist. Waiting and retrying in 5 seconds."
+                )
 
-            ctx.info(
-                "VM for port is not in active state, but %(state)s. Waiting and retrying in 5 seconds.",
-                state=vm_state,
-            )
             tries += 1
             time.sleep(resource.wait)
 
