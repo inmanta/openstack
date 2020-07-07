@@ -1,3 +1,9 @@
+# 3.5.3
+- Pin dependencies using ~=
+
+# 3.5.2
+- Pin transitive dependencies
+
 # 3.5.1
 - Fix problem where the vm_state variable is referenced before assignment
 
