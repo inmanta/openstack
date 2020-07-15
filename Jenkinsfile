@@ -48,10 +48,10 @@ pipeline {
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'jenkins_on_openstack',
-                        passwordVariable: 'PACKSTACK_OS_PASSWORD',
-                        usernameVariable: 'PACKSTACK_OS_USERNAME',
+                        passwordVariable: 'INFRA_SETUP_OS_PASSWORD',
+                        usernameVariable: 'INFRA_SETUP_OS_USERNAME',
                     ),
-                    string(credentialsId: 'jenkins_on_openstack_url_node3', variable: 'PACKSTACK_OS_AUTH_URL'),
+                    string(credentialsId: 'jenkins_on_openstack_url_node3', variable: 'INFRA_SETUP_OS_AUTH_URL'),
                     usernamePassword(
                         credentialsId: 'packstack-super-user', passwordVariable: 'OS_PASSWORD', usernameVariable: 'OS_USERNAME'
                     ),
@@ -60,7 +60,7 @@ pipeline {
                     // fix for bug in pytest-inmanta where folder name is used as module name
                     dir('openstack'){
                         sh '''
-                            export PACKSTACK_OS_PROJECT_NAME="${PACKSTACK_OS_USERNAME}"
+                            export INFRA_SETUP_OS_PROJECT_NAME="${PACKSTACK_OS_USERNAME}"
                             export OS_PROJECT_NAME="${OS_USERNAME}"
                             $INMANTA_TEST_ENV/bin/python3 -m pytest --junitxml=junit.xml -vvv tests
                         '''

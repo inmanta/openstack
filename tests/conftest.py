@@ -43,10 +43,10 @@ class PackStackVM:
     NETWORK_ID: str = "14376e55-8447-4aa9-9b35-b8f922eadbd6"
 
     def __init__(self) -> None:
-        auth_url = self._get_environment_variable("PACKSTACK_OS_AUTH_URL")
-        username = self._get_environment_variable("PACKSTACK_OS_USERNAME")
-        password = self._get_environment_variable("PACKSTACK_OS_PASSWORD")
-        tenant = self._get_environment_variable("PACKSTACK_OS_PROJECT_NAME")
+        auth_url = self._get_environment_variable("INFRA_SETUP_OS_AUTH_URL")
+        username = self._get_environment_variable("INFRA_SETUP_OS_USERNAME")
+        password = self._get_environment_variable("INFRA_SETUP_OS_PASSWORD")
+        tenant = self._get_environment_variable("INFRA_SETUP_OS_PROJECT_NAME")
         session = create_session(auth_url, username, password, tenant)
         self._nova_client = nova_client.Client("2", session=session)
         self._neutron_client = neutron_client.Client("2.0", session=session)
