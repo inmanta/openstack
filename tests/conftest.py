@@ -15,9 +15,13 @@
 
     Contact: code@inmanta.com
 """
+import logging
 import os
+import time
+from typing import Callable
 
 import pytest
+import requests
 from glanceclient.v2 import client as glance_client
 from keystoneauth1 import exceptions
 from keystoneauth1 import session as keystone_session
@@ -26,7 +30,133 @@ from keystoneclient.v3 import client as keystone_client
 from neutronclient.neutron import client as neutron_client
 from novaclient import client as nova_client
 
+LOGGER = logging.getLogger(__name__)
+
 PREFIX = "inmanta_unit_test_"
+
+
+class PackStackVM:
+
+    PACKSTACK_IP: str = "192.168.26.18"
+    IMAGE_NAME: str = "packstack-snapshot"
+    FLAVOR_NAME: str = "c4m16d20"
+    NETWORK_ID: str = "14376e55-8447-4aa9-9b35-b8f922eadbd6"
+
+    def __init__(self) -> None:
+        auth_url = self._get_environment_variable("PACKSTACK_OS_AUTH_URL")
+        username = self._get_environment_variable("PACKSTACK_OS_USERNAME")
+        password = self._get_environment_variable("PACKSTACK_OS_PASSWORD")
+        tenant = self._get_environment_variable("PACKSTACK_OS_PROJECT_NAME")
+        session = create_session(auth_url, username, password, tenant)
+        self._nova_client = nova_client.Client("2", session=session)
+        self._neutron_client = neutron_client.Client("2.0", session=session)
+        self._glance_client = glance_client.Client(session=session)
+        self._server = None
+
+    def _get_environment_variable(self, env_var_name) -> str:
+        env_var = os.getenv(env_var_name)
+        if env_var is None:
+            raise Exception(f"Environment variable {env_var_name} should be set")
+        return env_var
+
+    def create(self) -> None:
+        if self._server is not None:
+            raise Exception("Server was already created")
+        try:
+            self._create_vm()
+            self._disable_port_security()
+            LOGGER.info("Waiting until packstack is up")
+            self._wait_until(
+                self._is_packstart_up,
+                timeout_in_sec=1800,
+                timeout_message="Packstack didn't come online after 1800sec",
+            )
+        except Exception as e:
+            if self._server is not None:
+                self.delete()
+            raise e
+
+    def _create_vm(self) -> None:
+        LOGGER.info("Creating packstack VM")
+        path_to_userdata_file = os.path.join(
+            os.path.dirname(__file__), "..", "ci", "user_data"
+        )
+        with open(path_to_userdata_file, "r") as f:
+            user_data = f.read()
+        flavor_id = self._nova_client.flavors.find(name=self.FLAVOR_NAME).id
+        image_ids = [
+            image.id
+            for image in self._glance_client.images.list()
+            if image["name"] == self.IMAGE_NAME
+        ]
+        if not image_ids:
+            raise Exception(f"Image with name {self.IMAGE_NAME} not found")
+        image_id = image_ids[0]
+        self._server = self._nova_client.servers.create(
+            name="packstack",
+            flavor=flavor_id,
+            userdata=user_data,
+            nics=[{"net-id": self.NETWORK_ID}],
+            image=image_id,
+            config_drive=True,
+        )
+        LOGGER.info("Waiting until the VM enters the active state")
+        self._wait_until(
+            self._is_vm_in_active_state,
+            timeout_in_sec=180,
+            timeout_message="VM didn't get into the active state in 180sec",
+        )
+
+    def _disable_port_security(self) -> None:
+        LOGGER.info("Disabling port security")
+        ports = self._neutron_client.list_ports(device_id=self._server.id)
+        assert len(ports["ports"]) > 0
+        port = ports["ports"][0]
+        self._neutron_client.update_port(
+            port=port["id"],
+            body={"port": {"port_security_enabled": False, "security_groups": None}},
+        )
+
+    def delete(self) -> None:
+        if self._server is None:
+            return
+        LOGGER.info("Deleting packstack VM")
+        self._server.delete()
+        self._server = None
+
+    def _is_vm_in_active_state(self) -> bool:
+        vm = self._nova_client.servers.get(self._server.id)
+        vm_state = getattr(vm, "OS-EXT-STS:vm_state")
+        return vm_state == "active"
+
+    def _is_packstart_up(self) -> bool:
+        try:
+            for port in [8774, 5000, 9292, 9696, 8778, 8776]:
+                requests.get(f"http://{self.PACKSTACK_IP}:{port}", timeout=5)
+        except requests.RequestException:
+            LOGGER.debug("Port %d not up", port)
+            return False
+        return True
+
+    def _wait_until(
+        self, func: Callable[[], bool], timeout_in_sec: int, timeout_message: str
+    ) -> None:
+        timeout_timestamp = time.time() + timeout_in_sec
+        while not func() and time.time() < timeout_timestamp:
+            time.sleep(5)
+        if not func:
+            raise Exception(timeout_message)
+
+
+@pytest.fixture(
+    scope="session",
+    autouse=os.getenv("INMANTA_TEST_INFRA_SETUP", default="false").lower() == "true",
+)
+def create_packstack_vm():
+    packstack_vm = PackStackVM()
+    packstack_vm.create()
+    yield
+    packstack_vm.delete()
 
 
 @pytest.fixture(scope="session")
@@ -35,6 +165,12 @@ def session():
     username = os.environ["OS_USERNAME"]
     password = os.environ["OS_PASSWORD"]
     tenant = os.environ["OS_PROJECT_NAME"]
+    yield create_session(auth_url, username, password, tenant)
+
+
+def create_session(
+    auth_url: str, username: str, password: str, tenant: str
+) -> keystone_session.Session:
     auth = v3.Password(
         auth_url=auth_url,
         username=username,
@@ -43,8 +179,7 @@ def session():
         user_domain_id="default",
         project_domain_id="default",
     )
-    sess = keystone_session.Session(auth=auth)
-    yield sess
+    return keystone_session.Session(auth=auth)
 
 
 @pytest.fixture(scope="session")

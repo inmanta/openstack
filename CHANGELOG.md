@@ -1,3 +1,6 @@
+# 3.5.4
+- Start the packstack VM via pytest
+
 # 3.5.3
 - Pin dependencies using ~=
 
