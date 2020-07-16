@@ -88,9 +88,11 @@ pipeline {
         stage('linting') {
             steps {
                 script {
-                    sh '''
-                        ${WORKSPACE}/env/bin/flake8 ${WORKSPACE}/openstack/plugins ${WORKSPACE}/openstack/tests
-                    '''
+                    dir('openstack'){
+                      sh '''
+                          ${WORKSPACE}/env/bin/flake8 plugins tests
+                      '''
+                    }
                 }
             }
         }
