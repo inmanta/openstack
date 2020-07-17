@@ -109,3 +109,47 @@ def test_dependency_handling(project):
 
     assert_requires("VirtualMachine", "SecurityGroup")
     assert_requires("SecurityGroup", "Project")
+
+
+def test_issue_79(project):
+    """
+        When a VM and its hostport are being purged, the hostport should be deleted before the VM gets deleted.
+    """
+
+    def _get_model(purged: bool):
+        return f"""
+    import unittest
+    import openstack
+    import ssh
+
+    tenant = "tenant"
+    p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                            password=std::get_env("OS_PASSWORD"), tenant=tenant)
+    project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+    n = openstack::Network(provider=p, name="net", project=project)
+    subnet = openstack::Subnet(provider=p, project=project, network=n, dhcp=true, name="subnet",
+                               network_address="10.255.255.0/24", dns_servers=["8.8.8.8", "8.8.4.4"])
+
+    os = std::OS(name="cirros", version=0.4, family=std::linux)
+    key = ssh::Key(name="key", public_key="")
+
+    vm = openstack::VirtualMachine(provider=p, project=project, key_pair=key, name="server",
+                                image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
+                                purged={str(purged).lower()})
+
+    port = openstack::HostPort(provider=p, project=project, name="port", subnet=subnet, address="10.255.255.10",
+                               dhcp=false, vm=vm, purged={str(purged).lower()})
+    vm.eth0_port = port
+        """
+
+    project.compile(_get_model(purged=False))
+    vm = project.get_resource("openstack::VirtualMachine")
+    hostport = project.get_resource("openstack::HostPort")
+    assert vm.id in hostport.requires
+    assert hostport.id not in vm.requires
+
+    project.compile(_get_model(purged=True))
+    vm = project.get_resource("openstack::VirtualMachine")
+    hostport = project.get_resource("openstack::HostPort")
+    assert vm.id not in hostport.requires
+    assert hostport.id in vm.requires

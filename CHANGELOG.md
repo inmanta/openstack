@@ -1,3 +1,6 @@
+# 3.5.5
+- Ensure a hostport gets deleted before the associated VM (#79)
+
 # 3.5.4
 - Start the packstack VM via pytest
 
