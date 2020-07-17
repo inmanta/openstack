@@ -7,7 +7,7 @@ TEST_IMAGE_NAME = "inmanta_unit_test"
 TEST_PROJECT_NAME = "inmanta_unit_test"
 CIRROS_URI = "https://www.example.com/"  # not an image but speeds up tests by a lot
 
-OPENSTACK_BASE = f"""
+OPENSTACK_BASE = """
 import openstack
 
 tenant = std::get_env("OS_PROJECT_NAME")
