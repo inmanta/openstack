@@ -22,14 +22,6 @@ import pytest
 from keystoneclient.v3 import client
 
 
-def print_ctx(ctx):
-    print(ctx._changes)
-    for l in ctx.logs:
-        print(l._data)
-        if "traceback" in l._data["kwargs"]:
-            print(l._data["kwargs"]["traceback"])
-
-
 def test_project(project, keystone):
     try:
         project_name = "inmanta_unit_test"

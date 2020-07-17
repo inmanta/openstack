@@ -20,14 +20,6 @@ import time
 import inmanta
 
 
-def print_ctx(ctx):
-    print(ctx._changes)
-    for l in ctx.logs:
-        print(l._data)
-        if "traceback" in l._data["kwargs"]:
-            print(l._data["kwargs"]["traceback"])
-
-
 def test_boot_vm(project, keystone, nova, neutron):
     name = "inmanta-unit-test"
     key = (
