@@ -1,3 +1,15 @@
+# 3.5.5
+- Ensure a hostport gets deleted before the associated VM (#79)
+
+# 3.5.4
+- Start the packstack VM via pytest
+
+# 3.5.3
+- Pin dependencies using ~=
+
+# 3.5.2
+- Pin transitive dependencies
+
 # 3.5.1
 - Fix problem where the vm_state variable is referenced before assignment
 

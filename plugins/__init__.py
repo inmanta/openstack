@@ -670,26 +670,51 @@ MANAGED_DEPENDENCIES = {
 
 
 def resource_collector(resource_model):
-    collector = defaultdict(lambda: defaultdict(lambda: {}))
+    purged_resources = defaultdict(lambda: defaultdict(lambda: {}))
+    non_purged_resources = defaultdict(lambda: defaultdict(lambda: {}))
 
     for current_resource in resource_model.values():
         rtype = current_resource.id.entity_type
         if rtype in MANAGED_DEPENDENCIES:
+            resource_name = current_resource.name
             provider = current_resource.model.provider
             if not current_resource.purged:
-                collector[provider][rtype][current_resource.name] = current_resource
+                non_purged_resources[provider][rtype][resource_name] = current_resource
+            else:
+                purged_resources[provider][rtype][resource_name] = current_resource
 
-    return collector
+    return purged_resources, non_purged_resources
 
 
 @dependency_manager
 def openstack_dependencies(config_model, resource_model):
-    for project, collector in resource_collector(resource_model).items():
-        openstack_dependencies_for_provider(collector)
+    purged_resources, non_purged_resources = resource_collector(resource_model)
+    for project, collector in non_purged_resources.items():
+        set_dependencies_on_non_purged_resources(collector)
+    for project, collector in purged_resources.items():
+        set_dependencies_on_purged_resources(collector)
 
 
-def openstack_dependencies_for_provider(collector: Dict[str, OpenstackResource]):
+def set_dependencies_on_purged_resources(
+    collector: Dict[str, OpenstackResource]
+) -> None:
+    """
+        This method only sets the dependencies between a VM and its ports!
+    """
+    vms = collector.get("openstack::VirtualMachine", {})
+    ports = collector.get("openstack::HostPort", {})
 
+    # When the VM is purged, all its purged ports should be deployed first
+    for vm in vms.values():
+        for vm_port in vm.ports:
+            if vm_port["name"] in ports:
+                port_id = ports[vm_port["name"]].id
+                vm.requires.add(port_id)
+
+
+def set_dependencies_on_non_purged_resources(
+    collector: Dict[str, OpenstackResource]
+) -> None:
     projects = collector.get("openstack::Project", {})
     networks = collector.get("openstack::Network", {})
     routers = collector.get("openstack::Router", {})
