@@ -1,3 +1,2 @@
 pipeline_template: ci/modules/Jenkinsfile-integration-tests
-locks:
-    - packstack
+locks: packstack
