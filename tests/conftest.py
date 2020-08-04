@@ -62,7 +62,11 @@ class PackStackVM:
         return env_var
 
     def _delete_previous_instances(self) -> None:
-        for server in self._nova_client.servers.list(search_opts={"name": self.PACKSTACK_VM_NAME}):
+        servers = self._nova_client.servers.list(
+            search_opts={"name": self.PACKSTACK_VM_NAME}
+        )
+
+        for server in servers:
             server.delete()
 
     def create(self) -> None:
