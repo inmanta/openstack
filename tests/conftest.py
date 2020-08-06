@@ -18,7 +18,7 @@
 import logging
 import os
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 import pytest
 import requests
@@ -29,6 +29,7 @@ from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_client
 from neutronclient.neutron import client as neutron_client
 from novaclient import client as nova_client
+from novaclient.v2.servers import Server
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class PackStackVM:
     IMAGE_NAME: str = "packstack-snapshot"
     FLAVOR_NAME: str = "c4m16d20"
     NETWORK_ID: str = "14376e55-8447-4aa9-9b35-b8f922eadbd6"
+    PACKSTACK_VM_NAME: str = "packstack"
 
     def __init__(self) -> None:
         auth_url = self._get_environment_variable("INFRA_SETUP_OS_AUTH_URL")
@@ -51,7 +53,7 @@ class PackStackVM:
         self._nova_client = nova_client.Client("2", session=session)
         self._neutron_client = neutron_client.Client("2.0", session=session)
         self._glance_client = glance_client.Client(session=session)
-        self._server = None
+        self._server: Optional[Server] = None
 
     def _get_environment_variable(self, env_var_name) -> str:
         env_var = os.getenv(env_var_name)
@@ -59,10 +61,19 @@ class PackStackVM:
             raise Exception(f"Environment variable {env_var_name} should be set")
         return env_var
 
+    def _delete_previous_instances(self) -> None:
+        servers = self._nova_client.servers.list(
+            search_opts={"name": self.PACKSTACK_VM_NAME}
+        )
+
+        for server in servers:
+            server.delete()
+
     def create(self) -> None:
         if self._server is not None:
             raise Exception("Server was already created")
         try:
+            self._delete_previous_instances()
             self._create_vm()
             self._disable_port_security()
             LOGGER.info("Waiting until packstack is up")
@@ -93,7 +104,7 @@ class PackStackVM:
             raise Exception(f"Image with name {self.IMAGE_NAME} not found")
         image_id = image_ids[0]
         self._server = self._nova_client.servers.create(
-            name="packstack",
+            name=self.PACKSTACK_VM_NAME,
             flavor=flavor_id,
             userdata=user_data,
             nics=[{"net-id": self.NETWORK_ID}],
