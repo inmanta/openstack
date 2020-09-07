@@ -5,7 +5,7 @@ python-neutronclient~=7.2
 python-glanceclient<3.3
 
 appdirs~=1.4
-attrs~=20.1
+attrs~=20.2
 certifi~=2020.6
 cffi~=1.14
 chardet~=3.0
