@@ -482,7 +482,7 @@ vm2.vm.security_groups=[sg_mgmt]
 
 def test_shared_network(project, openstack):
     """
-        Create a shared network as one tenant and add ports to it as another tenant
+    Create a shared network as one tenant and add ports to it as another tenant
     """
     tenant1 = openstack.get_project("tenant1")
     tenant2 = openstack.get_project("tenant2")
@@ -599,7 +599,7 @@ def test_shared_network(project, openstack):
 
 def test_allowed_addr_port(project, openstack):
     """
-        Test creating a port with allowed address pairs
+    Test creating a port with allowed address pairs
     """
     tenant1 = openstack.get_project("tenant1")
     net_name = tenant1.get_resource_name("net")
@@ -669,7 +669,7 @@ def test_allowed_addr_port(project, openstack):
 )
 def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     """
-        Test whether the gateway_ip and the disable_gateway_ip settings of a subnet work correctly.
+    Test whether the gateway_ip and the disable_gateway_ip settings of a subnet work correctly.
     """
     tenant1 = openstack.get_project("tenant1")
     net_name = tenant1.get_resource_name("net")

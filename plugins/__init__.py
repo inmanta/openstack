@@ -72,15 +72,15 @@ def find_image(
     provider: "openstack::Provider", os: "std::OS", name: "string" = None
 ) -> "string":
     """
-        Search for an image that matches the given operating system. This plugin uses
-        the os_distro and os_version tags of an image and the name and version attributes of
-        the OS parameter.
+    Search for an image that matches the given operating system. This plugin uses
+    the os_distro and os_version tags of an image and the name and version attributes of
+    the OS parameter.
 
-        If multiple images match, the most recent image is returned.
+    If multiple images match, the most recent image is returned.
 
-        :param provider: The provider to query for an image
-        :param os: The operating system and version (using os_distro and os_version metadata)
-        :param name: An optional string that the image name should contain
+    :param provider: The provider to query for an image
+    :param os: The operating system and version (using os_distro and os_version metadata)
+    :param name: An optional string that the image name should contain
     """
     global FIND_IMAGE_RESULT
 
@@ -155,11 +155,11 @@ def find_flavor(
     pinned: "bool" = False,
 ) -> "string":
     """
-        Find the flavor that matches the closest to the resources requested.
+    Find the flavor that matches the closest to the resources requested.
 
-        :param vcpus: The number of virtual cpus in the flavor
-        :param ram: The amount of ram in gigabyte
-        :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
+    :param vcpus: The number of virtual cpus in the flavor
+    :param ram: The amount of ram in gigabyte
+    :param pinned: Wether the CPUs need to be pinned (#vcpu == #pcpu)
     """
     global FLAVORS
     global FIND_FLAVOR_RESULT
@@ -241,7 +241,7 @@ class OpenstackResource(OpenstackAdminResource):
 @resource("openstack::Flavor", agent="provider.name", id_attribute="name")
 class Flavor(OpenstackAdminResource):
     """
-        A flavor is an available hardware configuration for a server.
+    A flavor is an available hardware configuration for a server.
     """
 
     fields = (
@@ -281,7 +281,7 @@ class Image(OpenstackAdminResource):
 @resource("openstack::VirtualMachine", agent="provider.name", id_attribute="name")
 class VirtualMachine(OpenstackResource):
     """
-        A virtual machine managed by a hypervisor or IaaS
+    A virtual machine managed by a hypervisor or IaaS
     """
 
     fields = (
@@ -309,8 +309,8 @@ class VirtualMachine(OpenstackResource):
     @staticmethod
     def get_user_data(exporter, vm):
         """
-            Return an empty string when the user_data value is unknown
-            TODO: this is a hack
+        Return an empty string when the user_data value is unknown
+        TODO: this is a hack
         """
         try:
             ua = vm.user_data
@@ -345,7 +345,7 @@ class VirtualMachine(OpenstackResource):
 @resource("openstack::Network", agent="provider.name", id_attribute="name")
 class Network(OpenstackResource):
     """
-        This class represents a network in neutron
+    This class represents a network in neutron
     """
 
     fields = (
@@ -362,7 +362,7 @@ class Network(OpenstackResource):
 @resource("openstack::Subnet", agent="provider.name", id_attribute="name")
 class Subnet(OpenstackResource):
     """
-        This class represent a subnet in neutron
+    This class represent a subnet in neutron
     """
 
     fields = (
@@ -392,7 +392,7 @@ class Subnet(OpenstackResource):
 @resource("openstack::Router", agent="provider.name", id_attribute="name")
 class Router(OpenstackResource):
     """
-        This class represent a router in neutron
+    This class represent a router in neutron
     """
 
     fields = ("name", "subnets", "gateway", "ports", "routes")
@@ -425,7 +425,7 @@ class Router(OpenstackResource):
 
 class Port(OpenstackResource):
     """
-        A generic port
+    A generic port
     """
 
     fields = ("name", "address", "subnet", "network")
@@ -449,7 +449,7 @@ class Port(OpenstackResource):
 @resource("openstack::RouterPort", agent="provider.name", id_attribute="name")
 class RouterPort(Port):
     """
-        A port in a router
+    A port in a router
     """
 
     fields = ("name", "address", "subnet", "router", "network")
@@ -462,7 +462,7 @@ class RouterPort(Port):
 @resource("openstack::HostPort", agent="provider.name", id_attribute="name")
 class HostPort(Port):
     """
-        A port in a router
+    A port in a router
     """
 
     fields = (
@@ -494,7 +494,7 @@ class HostPort(Port):
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
 class SecurityGroup(OpenstackResource):
     """
-        A security group in an OpenStack tenant
+    A security group in an OpenStack tenant
     """
 
     fields = ("name", "description", "manage_all", "rules", "retries", "wait")
@@ -545,7 +545,7 @@ class SecurityGroup(OpenstackResource):
 @resource("openstack::FloatingIP", agent="provider.name", id_attribute="name")
 class FloatingIP(OpenstackResource):
     """
-        A floating ip
+    A floating ip
     """
 
     fields = ("name", "port", "external_network", "address")
@@ -603,7 +603,7 @@ class KeystoneResource(PurgeableResource, ManagedResource):
 @resource("openstack::Project", agent="provider.name", id_attribute="name")
 class Project(KeystoneResource):
     """
-        This class represents a project in keystone
+    This class represents a project in keystone
     """
 
     fields = ("name", "enabled", "description")
@@ -616,7 +616,7 @@ class Project(KeystoneResource):
 @resource("openstack::User", agent="provider.name", id_attribute="name")
 class User(KeystoneResource):
     """
-        A user in keystone
+    A user in keystone
     """
 
     fields = ("name", "email", "enabled", "password")
@@ -625,7 +625,7 @@ class User(KeystoneResource):
 @resource("openstack::Role", agent="provider.name", id_attribute="role_id")
 class Role(KeystoneResource):
     """
-        A role that adds a user to a project
+    A role that adds a user to a project
     """
 
     fields = ("role_id", "role", "project", "user", "project")
@@ -642,7 +642,7 @@ class Role(KeystoneResource):
 @resource("openstack::Service", agent="provider.name", id_attribute="name")
 class Service(KeystoneResource):
     """
-        A service for which endpoints can be registered
+    A service for which endpoints can be registered
     """
 
     fields = ("name", "type", "description")
@@ -651,7 +651,7 @@ class Service(KeystoneResource):
 @resource("openstack::EndPoint", agent="provider.name", id_attribute="service_id")
 class EndPoint(KeystoneResource):
     """
-        An endpoint for a service
+    An endpoint for a service
     """
 
     fields = ("region", "internal_url", "public_url", "admin_url", "service_id")
@@ -699,7 +699,7 @@ def set_dependencies_on_purged_resources(
     collector: Dict[str, OpenstackResource]
 ) -> None:
     """
-        This method only sets the dependencies between a VM and its ports!
+    This method only sets the dependencies between a VM and its ports!
     """
     vms = collector.get("openstack::VirtualMachine", {})
     ports = collector.get("openstack::HostPort", {})
@@ -856,7 +856,7 @@ class OpenStackHandler(CRUDHandler):
 
     def get_project_id(self, resource, name):
         """
-            Retrieve the id of a project based on the given name
+        Retrieve the id of a project based on the given name
         """
         # Fallback for non admin users
         if resource.admin_tenant == name:
@@ -876,7 +876,7 @@ class OpenStackHandler(CRUDHandler):
 
     def get_network(self, project_id, name=None, network_id=None):
         """
-            Retrieve the network id based on the name of the network
+        Retrieve the network id based on the name of the network
         """
         query = {}
         if project_id is not None and network_id is None:
@@ -904,7 +904,7 @@ class OpenStackHandler(CRUDHandler):
 
     def get_subnet(self, project_id, name=None, subnet_id=None):
         """
-            Retrieve the subnet id based on the name of the network
+        Retrieve the subnet id based on the name of the network
         """
         if name is not None:
             subnets = self._neutron.list_subnets(tenant_id=project_id, name=name)
@@ -990,7 +990,7 @@ class OpenStackHandler(CRUDHandler):
 
     def get_host(self, project_id, name):
         """
-            Retrieve the router id based on the name of the network
+        Retrieve the router id based on the name of the network
         """
         vms = self._nova.servers.findall(name=name)
 
@@ -1008,7 +1008,7 @@ class OpenStackHandler(CRUDHandler):
 
     def get_host_for_id(self, server_id):
         """
-            Retrieve the router id based on the name of the network
+        Retrieve the router id based on the name of the network
         """
         vms = self._nova.servers.findall(id=server_id)
 
@@ -1023,7 +1023,7 @@ class OpenStackHandler(CRUDHandler):
 
     def get_security_group(self, ctx, name=None, group_id=None):
         """
-            Get security group details from openstack
+        Get security group details from openstack
         """
         if name is not None:
             sgs = self._neutron.list_security_groups(name=name)
@@ -1398,8 +1398,8 @@ class VirtualMachineHandler(OpenStackHandler):
 
     def read_resource(self, ctx, resource):
         """
-            This method will check what the status of the give resource is on
-            openstack.
+        This method will check what the status of the give resource is on
+        openstack.
         """
         server = self.get_vm(ctx, resource)
         if server is None:
@@ -2115,8 +2115,8 @@ class HostPortHandler(OpenStackHandler):
 
     def wait_for_active(self, ctx, project_id, resource):
         """
-            A port cannot be attached to a VM when the VM is in the building state. This method waits a limited amount of
-            time for the VM to become active. If it takes to long, this resource will be skipped.
+        A port cannot be attached to a VM when the VM is in the building state. This method waits a limited amount of
+        time for the VM to become active. If it takes to long, this resource will be skipped.
         """
         tries = 0
         max_attempts = resource.retries if resource.retries > 0 else 1
@@ -2800,7 +2800,7 @@ class UserHandler(OpenStackHandler):
 @provider("openstack::Role", name="openstack")
 class RoleHandler(OpenStackHandler):
     """
-        creates roles and user, project, role assocations
+    creates roles and user, project, role assocations
     """
 
     def read_resource(self, ctx, resource):

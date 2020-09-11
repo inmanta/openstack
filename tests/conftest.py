@@ -215,7 +215,7 @@ def glance(session):
 
 class Project(object):
     """
-        An project instance
+    An project instance
     """
 
     def __init__(
@@ -280,7 +280,7 @@ class Project(object):
 
 class OpenstackTester(object):
     """
-        Object that provides access to an openstack and performs cleanup
+    Object that provides access to an openstack and performs cleanup
     """
 
     def __init__(self):
@@ -302,7 +302,7 @@ class OpenstackTester(object):
 
     def get_project(self, name):
         """
-            Get a project with the given name (will be prefixed!). If it already exists a reference is returned
+        Get a project with the given name (will be prefixed!). If it already exists a reference is returned
         """
         if name in self._projects:
             return self._projects[name]
@@ -340,7 +340,7 @@ class OpenstackTester(object):
 
     def cleanup(self):
         """
-            There might be dependencies over tenants. The "easiest" way is trial and error delete in a loop.
+        There might be dependencies over tenants. The "easiest" way is trial and error delete in a loop.
         """
         count = 0
         ready = False
@@ -361,7 +361,7 @@ class OpenstackTester(object):
 
     def clean_project(self, project):
         """
-            Clean all the resource in the given project
+        Clean all the resource in the given project
         """
         try:
             project_id = project.project_object.id
