@@ -113,7 +113,7 @@ def test_dependency_handling(project):
 
 def test_issue_79(project):
     """
-        When a VM and its hostport are being purged, the hostport should be deleted before the VM gets deleted.
+    When a VM and its hostport are being purged, the hostport should be deleted before the VM gets deleted.
     """
 
     def _get_model(purged: bool):
