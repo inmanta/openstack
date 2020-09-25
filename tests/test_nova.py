@@ -15,11 +15,11 @@
 
     Contact: code@inmanta.com
 """
-import pytest
 import time
 from typing import Optional, Tuple
 
 import inmanta
+import pytest
 from inmanta.ast import ExplicitPluginException
 
 
