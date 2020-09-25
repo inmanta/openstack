@@ -180,4 +180,4 @@ def test_59_find_flavor_exception(project, keystone, nova) -> None:
         ExplicitPluginException,
         match=f"Couldn't find a flavor with at least {cpus} unpinned CPUs and {ram} Gigabytes of RAM",
     ):
-        project.compile(get_model(name, key), flavor_constraints=(cpus, ram))
+        project.compile(get_model(name, key, flavor_constraints=(cpus, ram)))
