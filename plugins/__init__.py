@@ -23,7 +23,7 @@ import os
 import time
 import traceback
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 import keystoneauth1.exceptions
 import novaclient.exceptions
@@ -41,7 +41,7 @@ from inmanta.agent.handler import (
 from inmanta.execute import proxy
 from inmanta.execute.util import Unknown
 from inmanta.export import dependency_manager
-from inmanta.plugins import plugin
+from inmanta.plugins import PluginException, plugin
 from inmanta.resources import ManagedResource, PurgeableResource, resource
 from keystoneauth1 import session
 from keystoneauth1.identity import v3
@@ -49,6 +49,7 @@ from keystoneclient.v3 import client as keystone_client
 from neutronclient.common import exceptions
 from neutronclient.neutron import client as neutron_client
 from novaclient import client as nova_client
+from novaclient.v2 import flavors
 
 try:
     from keystoneclient.exceptions import NotFound
@@ -184,7 +185,7 @@ def find_flavor(
 
             FLAVORS[provider.name] = list(client.flavors.list())
 
-        selected = (1000000, None)
+        selected: Tuple[int, Optional[flavors.Flavor]] = (1000000, None)
         for flavor in FLAVORS[provider.name]:
             keys = flavor.get_keys()
             is_pinned = "hw:cpu_policy" in keys and keys["hw:cpu_policy"] == "dedicated"
@@ -196,6 +197,12 @@ def find_flavor(
             distance = math.sqrt(math.pow(d_cpu, 2) + math.pow(d_ram, 2))
             if d_cpu >= 0 and d_ram >= 0 and distance < selected[0]:
                 selected = (distance, flavor)
+
+        if selected[1] is None:
+            raise PluginException(
+                "Couldn't find a flavor with at least %s %s CPUs and %s Gigabytes of RAM."
+                % (vcpus, "pinned" if pinned else "unpinned", ram)
+            )
 
         FIND_FLAVOR_RESULT[ident] = selected[1].name
         return selected[1].name

@@ -1,3 +1,6 @@
+#3.5.6
+- Raise a `PluginException` when `find_flavor` fails to find a matching flavor.
+
 # 3.5.5
 - Ensure a hostport gets deleted before the associated VM (#79)
 
