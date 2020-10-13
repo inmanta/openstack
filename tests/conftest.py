@@ -212,9 +212,9 @@ def os_credentials_multi(request) -> OpenstackCredentials:
         env_var_postfix = ""
     yield OpenstackCredentials(
         auth_url=os.environ[f"OS_AUTH_URL{env_var_postfix}"],
-        username=os.environ[f"OS_USERNAME"],
-        password=os.environ[f"OS_PASSWORD"],
-        project_name=os.environ[f"OS_PROJECT_NAME"],
+        username=os.environ["OS_USERNAME"],
+        password=os.environ["OS_PASSWORD"],
+        project_name=os.environ["OS_PROJECT_NAME"],
         verify_cert=not use_self_signed_certificate,
     )
 
