@@ -34,9 +34,12 @@ end
 entity Provider:
     """
         The configuration for accessing an Openstack based IaaS
+
+        :param verify_cert: Indicates whether the SSL/TLS certificate should be verified.
     """
     string name
     string connection_url
+    bool verify_cert=true
     string username
     string password
     string tenant

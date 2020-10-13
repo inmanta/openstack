@@ -38,10 +38,8 @@ PREFIX = "inmanta_unit_test_"
 
 class PackStackVM:
 
-    PACKSTACK_IP: str = "192.168.26.18"
     IMAGE_NAME: str = "packstack-snapshot"
     FLAVOR_NAME: str = "c4m16d20"
-    NETWORK_ID: str = "14376e55-8447-4aa9-9b35-b8f922eadbd6"
     PACKSTACK_VM_NAME: str = "packstack"
 
     def __init__(self) -> None:
@@ -49,10 +47,14 @@ class PackStackVM:
         username = self._get_environment_variable("INFRA_SETUP_OS_USERNAME")
         password = self._get_environment_variable("INFRA_SETUP_OS_PASSWORD")
         tenant = self._get_environment_variable("INFRA_SETUP_OS_PROJECT_NAME")
-        session = create_session(auth_url, username, password, tenant)
+        session = create_session(auth_url, username, password, tenant, verify_cert=True)
         self._nova_client = nova_client.Client("2", session=session)
         self._neutron_client = neutron_client.Client("2.0", session=session)
         self._glance_client = glance_client.Client(session=session)
+        self._packstack_ip = self._get_environment_variable("PACKSTACK_IP")
+        self._packstack_network_id = self._get_environment_variable(
+            "PACKSTACK_NETWORK_ID"
+        )
         self._server: Optional[Server] = None
 
     def _get_environment_variable(self, env_var_name) -> str:
@@ -89,11 +91,6 @@ class PackStackVM:
 
     def _create_vm(self) -> None:
         LOGGER.info("Creating packstack VM")
-        path_to_userdata_file = os.path.join(
-            os.path.dirname(__file__), "..", "ci", "user_data"
-        )
-        with open(path_to_userdata_file, "r") as f:
-            user_data = f.read()
         flavor_id = self._nova_client.flavors.find(name=self.FLAVOR_NAME).id
         image_ids = [
             image.id
@@ -106,10 +103,8 @@ class PackStackVM:
         self._server = self._nova_client.servers.create(
             name=self.PACKSTACK_VM_NAME,
             flavor=flavor_id,
-            userdata=user_data,
-            nics=[{"net-id": self.NETWORK_ID}],
+            nics=[{"net-id": self._packstack_network_id}],
             image=image_id,
-            config_drive=True,
         )
         LOGGER.info("Waiting until the VM enters the active state")
         self._wait_until(
@@ -142,8 +137,13 @@ class PackStackVM:
 
     def _is_packstart_up(self) -> bool:
         try:
-            for port in [8774, 5000, 9292, 9696, 8778, 8776]:
-                requests.get(f"http://{self.PACKSTACK_IP}:{port}", timeout=5)
+            for port in [8774, 5000, 9292, 9696, 8778, 8776, 5001]:
+                if port == 5001:
+                    requests.get(
+                        f"https://{self._packstack_ip}:{port}", timeout=5, verify=False
+                    )
+                else:
+                    requests.get(f"http://{self._packstack_ip}:{port}", timeout=5)
         except requests.RequestException:
             LOGGER.debug("Port %d not up", port)
             return False
@@ -170,17 +170,74 @@ def create_packstack_vm():
     packstack_vm.delete()
 
 
+class OpenstackCredentials:
+    def __init__(
+        self,
+        auth_url: str,
+        username: str,
+        password: str,
+        project_name: str,
+        verify_cert: bool = True,
+    ) -> None:
+        self.auth_url = auth_url
+        self.username = username
+        self.password = password
+        self.project_name = project_name
+        self.verify_cert = verify_cert
+
+
 @pytest.fixture(scope="session")
-def session():
-    auth_url = os.environ["OS_AUTH_URL"]
-    username = os.environ["OS_USERNAME"]
-    password = os.environ["OS_PASSWORD"]
-    tenant = os.environ["OS_PROJECT_NAME"]
-    yield create_session(auth_url, username, password, tenant)
+def os_credentials() -> OpenstackCredentials:
+    yield OpenstackCredentials(
+        auth_url=os.environ["OS_AUTH_URL"],
+        username=os.environ["OS_USERNAME"],
+        password=os.environ["OS_PASSWORD"],
+        project_name=os.environ["OS_PROJECT_NAME"],
+    )
+
+
+@pytest.fixture(
+    scope="session", params=[True, False], ids=["with_self_signed_cert", "no_cert"]
+)
+def os_credentials_multi(request) -> OpenstackCredentials:
+    use_self_signed_certificate = request.param
+    if use_self_signed_certificate:
+        env_var_postfix = "_SS"
+    else:
+        env_var_postfix = ""
+    yield OpenstackCredentials(
+        auth_url=os.environ[f"OS_AUTH_URL{env_var_postfix}"],
+        username=os.environ["OS_USERNAME"],
+        password=os.environ["OS_PASSWORD"],
+        project_name=os.environ["OS_PROJECT_NAME"],
+        verify_cert=not use_self_signed_certificate,
+    )
+
+
+@pytest.fixture(scope="session")
+def session(os_credentials):
+    yield create_session(
+        os_credentials.auth_url,
+        os_credentials.username,
+        os_credentials.password,
+        os_credentials.project_name,
+        os_credentials.verify_cert,
+    )
+
+
+@pytest.fixture(scope="session")
+def session_multi(os_credentials_multi):
+    yield create_session(
+        os_credentials_multi.auth_url,
+        os_credentials_multi.username,
+        os_credentials_multi.password,
+        os_credentials_multi.project_name,
+        os_credentials_multi.verify_cert,
+    )
 
 
 def create_session(
-    auth_url: str, username: str, password: str, tenant: str
+    auth_url: str, username: str, password: str, tenant: str, verify_cert: bool
 ) -> keystone_session.Session:
     auth = v3.Password(
         auth_url=auth_url,
@@ -190,7 +247,7 @@ def create_session(
         user_domain_id="default",
         project_domain_id="default",
     )
-    return keystone_session.Session(auth=auth)
+    return keystone_session.Session(auth=auth, verify=verify_cert)
 
 
 @pytest.fixture(scope="session")
@@ -199,8 +256,18 @@ def nova(session):
 
 
 @pytest.fixture(scope="session")
+def nova_multi(session_multi):
+    yield nova_client.Client("2", session=session_multi)
+
+
+@pytest.fixture(scope="session")
 def neutron(session):
     yield neutron_client.Client("2.0", session=session)
+
+
+@pytest.fixture(scope="session")
+def neutron_multi(session_multi):
+    yield neutron_client.Client("2.0", session=session_multi)
 
 
 @pytest.fixture(scope="session")
@@ -209,8 +276,18 @@ def keystone(session):
 
 
 @pytest.fixture(scope="session")
+def keystone_multi(session_multi):
+    yield keystone_client.Client(session=session_multi)
+
+
+@pytest.fixture(scope="session")
 def glance(session):
     yield glance_client.Client(session=session)
+
+
+@pytest.fixture(scope="session")
+def glance_multi(session_multi):
+    yield glance_client.Client(session=session_multi)
 
 
 class Project(object):
@@ -220,16 +297,17 @@ class Project(object):
 
     def __init__(
         self,
-        tester: "OpenstackTester",
         auth_url: str,
         username: str,
         password: str,
         tenant: str,
+        verify_cert: bool,
     ):
         self._auth_url = auth_url
         self._username = username
         self._password = password
         self._tenant = tenant
+        self._verify_cert = verify_cert
         self._session_obj = None
         self._nova = None
         self._keystone = None
@@ -240,15 +318,13 @@ class Project(object):
     @property
     def session(self):
         if self._session_obj is None:
-            auth = v3.Password(
+            self._session_obj = create_session(
                 auth_url=self._auth_url,
                 username=self._username,
                 password=self._password,
-                project_name=self._tenant,
-                user_domain_id="default",
-                project_domain_id="default",
+                tenant=self._tenant,
+                verify_cert=self._verify_cert,
             )
-            self._session_obj = keystone_session.Session(auth=auth)
         return self._session_obj
 
     @property
@@ -283,18 +359,21 @@ class OpenstackTester(object):
     Object that provides access to an openstack and performs cleanup
     """
 
-    def __init__(self):
+    def __init__(self, os_admin_credentials: OpenstackCredentials) -> None:
+        self.os_admin_credentials = os_admin_credentials
         self._projects = {}
         self._admin = None
 
     @property
     def admin(self):
         if self._admin is None:
-            auth_url = os.environ["OS_AUTH_URL"]
-            username = os.environ["OS_USERNAME"]
-            password = os.environ["OS_PASSWORD"]
-            tenant = os.environ["OS_PROJECT_NAME"]
-            self._admin = Project(self, auth_url, username, password, tenant)
+            self._admin = Project(
+                self.os_admin_credentials.auth_url,
+                self.os_admin_credentials.username,
+                self.os_admin_credentials.password,
+                self.os_admin_credentials.project_name,
+                self.os_admin_credentials.verify_cert,
+            )
         return self._admin
 
     def get_resource_name(self, name: str) -> str:
@@ -308,10 +387,13 @@ class OpenstackTester(object):
             return self._projects[name]
 
         prefixed_tenant = self.get_resource_name(name)
-        auth_url = os.environ["OS_AUTH_URL"]
-        username = os.environ["OS_USERNAME"]
-        password = os.environ["OS_PASSWORD"]
-        prj = Project(self, auth_url, username, password, prefixed_tenant)
+        prj = Project(
+            self.os_admin_credentials.auth_url,
+            self.os_admin_credentials.username,
+            self.os_admin_credentials.password,
+            prefixed_tenant,
+            self.os_admin_credentials.verify_cert,
+        )
 
         self._projects[name] = prj
 
@@ -333,7 +415,7 @@ class OpenstackTester(object):
 
         # get the member role
         role = self.admin.keystone.roles.find(name="admin")
-        user = self.admin.keystone.users.find(name=username)
+        user = self.admin.keystone.users.find(name=self.os_admin_credentials.username)
         self.admin.keystone.roles.grant(user=user, role=role, project=project)
 
         return prj
@@ -394,9 +476,14 @@ class OpenstackTester(object):
 
 
 @pytest.fixture(scope="function")
-def openstack():
-    ost = OpenstackTester()
-
+def openstack(os_credentials):
+    ost = OpenstackTester(os_credentials)
     yield ost
+    ost.cleanup()
 
+
+@pytest.fixture(scope="function")
+def openstack_multi(os_credentials_multi):
+    ost = OpenstackTester(os_credentials_multi)
+    yield ost
     ost.cleanup()

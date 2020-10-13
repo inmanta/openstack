@@ -1,3 +1,6 @@
+#3.6.0
+- Add support to disable SSL verification (#152)
+
 #3.5.6
 - Raise a `PluginException` when `find_flavor` fails to find a matching flavor.
 
