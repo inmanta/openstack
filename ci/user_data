@@ -1,14 +1,19 @@
 #!/bin/bash
 echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCYNhZkdVdobsKylCBaDBXIekOim2RwqhyOW4s4AwY0aPkoGUz7ZbEpDh/M5NmRVhYA+sHhIZVTePQL3v33V2LQ8xH/jyyVmyEARpK4MviMk3ULquSzIHblWVDftQEhlO9EMcrSb9tz4Sp9BdczWmj16vplM8QyPhlB3VTmUO4sSxwQTo6uv0KAm8GurjKoaRrHB2e+yLXwlqK1GfBTQn6Gx/7qCsNNQBK0wMhBX3T6mo2t+nRwYPK2i8ofDrL9oB+VLylAq4/Og5PGZZHU81LigxevqmI45LDbpkauYaU0IsD3IFpMLhrsLyA8AIrZntitwrK2y+lSQZWJpiAiL5FshFWuquHIyaLTXBDl5lQp3A/jA0xxemfDTzxvqJW//v1SNdkHH/QOGxVu6C3HnDAmN2KmzE2hgYOrD5ZCPCPEWxyaWopy5suOU2PeTL1FuugsDAJLTk2muNJ2tsVHvEy/pdEG2d957psyHI29A2SLjoUTxFb/u0qv8svFoino2bE=" > /home/centos/.ssh/authorized_keys
 
-echo "BOOTPROTO=static
+rm -f /etc/sysconfig/network-scripts/ifcfg-ens3
+
+echo "BOOTPROTO=none
+NAME=eth0
 DEVICE=eth0
 GATEWAY=192.168.26.1
-IPADDR=192.168.26.18
+IPADDR=192.168.26.19
 MTU=1500
 NETMASK=255.255.255.0
 ONBOOT=yes
 TYPE=Ethernet
 USERCTL=no" > /etc/sysconfig/network-scripts/ifcfg-eth0
 
-systemctl restart network
+nmcli device disconnect eth0
+nmcli con reload
+nmcli con up eth0

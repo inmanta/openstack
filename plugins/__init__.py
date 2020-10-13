@@ -90,7 +90,6 @@ def find_image(
         return FIND_IMAGE_RESULT[ident]
 
     sess = None
-    client = None
     try:
         global IMAGES
         if provider.name not in IMAGES:
@@ -102,7 +101,7 @@ def find_image(
                 user_domain_id="default",
                 project_domain_id="default",
             )
-            sess = session.Session(auth=auth)
+            sess = session.Session(auth=auth, verify=provider.verify_cert)
             client = glance_client.Client("2", session=sess)
 
             IMAGES[provider.name] = list(client.images.list())
@@ -180,7 +179,7 @@ def find_flavor(
                 user_domain_id="default",
                 project_domain_id="default",
             )
-            sess = session.Session(auth=auth)
+            sess = session.Session(auth=auth, verify=provider.verify_cert)
             client = nova_client.Client("2.1", session=sess)
 
             FLAVORS[provider.name] = list(client.flavors.list())
@@ -218,7 +217,7 @@ def find_flavor(
 
 
 class OpenstackAdminResource(PurgeableResource, ManagedResource):
-    fields = ("admin_user", "admin_password", "admin_tenant", "auth_url")
+    fields = ("admin_user", "admin_password", "admin_tenant", "auth_url", "verify_cert")
 
     @staticmethod
     def get_admin_user(exporter, resource):
@@ -235,6 +234,10 @@ class OpenstackAdminResource(PurgeableResource, ManagedResource):
     @staticmethod
     def get_auth_url(exporter, resource):
         return resource.provider.connection_url
+
+    @staticmethod
+    def get_verify_cert(exporter, resource):
+        return resource.provider.verify_cert
 
 
 class OpenstackResource(OpenstackAdminResource):
@@ -580,6 +583,7 @@ class KeystoneResource(PurgeableResource, ManagedResource):
         "admin_password",
         "admin_tenant",
         "auth_url",
+        "verify_cert",
     )
 
     @staticmethod
@@ -605,6 +609,10 @@ class KeystoneResource(PurgeableResource, ManagedResource):
     @staticmethod
     def get_auth_url(exporter, resource):
         return resource.provider.connection_url
+
+    @staticmethod
+    def get_verify_cert(exporter, resource):
+        return resource.provider.verify_cert
 
 
 @resource("openstack::Project", agent="provider.name", id_attribute="name")
@@ -802,7 +810,7 @@ RESOURCE_TIMEOUT = 10
 
 class OpenStackHandler(CRUDHandler):
     @cache(timeout=CRED_TIMEOUT)
-    def get_session(self, auth_url, project, admin_user, admin_password):
+    def get_session(self, auth_url, project, admin_user, admin_password, verify_cert):
         auth = v3.Password(
             auth_url=auth_url,
             username=admin_user,
@@ -811,48 +819,48 @@ class OpenStackHandler(CRUDHandler):
             user_domain_id="default",
             project_domain_id="default",
         )
-        sess = session.Session(auth=auth)
+        sess = session.Session(auth=auth, verify=verify_cert)
         return sess
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_nova_client(self, auth_url, project, admin_user, admin_password):
+    def get_nova_client(self, auth_url, project, admin_user, admin_password, verify_cert):
         return nova_client.Client(
             "2.1",
-            session=self.get_session(auth_url, project, admin_user, admin_password),
+            session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert),
         )
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_neutron_client(self, auth_url, project, admin_user, admin_password):
+    def get_neutron_client(self, auth_url, project, admin_user, admin_password, verify_cert):
         return neutron_client.Client(
             "2.0",
-            session=self.get_session(auth_url, project, admin_user, admin_password),
+            session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert),
         )
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_keystone_client(self, auth_url, project, admin_user, admin_password):
+    def get_keystone_client(self, auth_url, project, admin_user, admin_password, verify_cert):
         return keystone_client.Client(
-            session=self.get_session(auth_url, project, admin_user, admin_password)
+            session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert)
         )
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_glance_client(self, auth_url, project, admin_user, admin_password):
+    def get_glance_client(self, auth_url, project, admin_user, admin_password, verify_cert):
         return glance_client.Client(
-            "2", session=self.get_session(auth_url, project, admin_user, admin_password)
+            "2", session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert)
         )
 
     def pre(self, ctx, resource):
         project = resource.admin_tenant
         self._nova = self.get_nova_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password
+            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
         )
         self._neutron = self.get_neutron_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password
+            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
         )
         self._keystone = self.get_keystone_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password
+            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
         )
         self._glance = self.get_glance_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password
+            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
         )
 
     def post(self, ctx, resource):
@@ -872,6 +880,7 @@ class OpenStackHandler(CRUDHandler):
                 resource.project,
                 resource.admin_user,
                 resource.admin_password,
+                resource.verify_cert
             )
             return session.get_project_id()
 

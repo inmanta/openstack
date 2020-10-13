@@ -26,60 +26,57 @@ from inmanta.ast import ExplicitPluginException
 def get_model(
     name: str,
     key: str,
+    os_credentials,
     purged: Optional[bool] = False,
     flavor_constraints: Optional[Tuple[int, int]] = None,
 ) -> str:
     if flavor_constraints is None:
         flavor_constraints = (1, 0.5)
 
-    return """
+    return f"""
 import unittest
 import openstack
 import ssh
 
 os = std::OS(name="cirros", version=0.4, family=std::linux)
 
-tenant = std::get_env("OS_PROJECT_NAME")
+tenant = "{os_credentials.project_name}"
 p = openstack::Provider(
     name="test",
-    connection_url=std::get_env("OS_AUTH_URL"),
-    username=std::get_env("OS_USERNAME"),
-    password=std::get_env("OS_PASSWORD"),
+    connection_url="{os_credentials.auth_url}",
+    username="{os_credentials.username}",
+    password="{os_credentials.password}",
     tenant=tenant,
+    verify_cert={str(os_credentials.verify_cert).lower()}
 )
-key = ssh::Key(name="%(name)s", public_key="%(key)s")
+key = ssh::Key(name="{name}", public_key="{key}")
 project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
-net = openstack::Network(provider=p, project=project, name="%(name)s", purged=%(purged)s)
+net = openstack::Network(provider=p, project=project, name="{name}", purged={str(purged).lower()})
 subnet = openstack::Subnet(
     provider=p,
     project=project,
     network=net,
     dhcp=true,
-    name="%(name)s",
+    name="{name}",
     network_address="10.255.255.0/24",
-    purged=%(purged)s,
+    purged={str(purged).lower()},
 )
 vm = openstack::Host(
     provider=p,
     project=project,
     key_pair=key,
-    name="%(name)s",
+    name="{name}",
     os=os,
     image=openstack::find_image(p, os),
-    flavor=openstack::find_flavor(p, %(flavor_constraints)s),
+    flavor=openstack::find_flavor(p, {", ".join(map(str, flavor_constraints))}),
     user_data="",
     subnet=subnet,
-    purged=%(purged)s,
+    purged={str(purged).lower()},
 )
-    """ % {
-        "name": name,
-        "key": key,
-        "purged": str(purged).lower(),
-        "flavor_constraints": ", ".join(map(str, flavor_constraints)),
-    }
+    """
 
 
-def test_boot_vm(project, keystone, nova, neutron):
+def test_boot_vm(project, keystone_multi, nova_multi, neutron_multi, os_credentials_multi):
     name = "inmanta-unit-test"
     key = (
         "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
@@ -90,7 +87,7 @@ def test_boot_vm(project, keystone, nova, neutron):
     project.add_fact(
         "openstack::Host[dnetcloud,name=%s]" % name, "ip_address", "10.1.1.1"
     )
-    project.compile(get_model(name, key))
+    project.compile(get_model(name, key, os_credentials_multi))
 
     n1 = project.get_resource("openstack::Network", name=name)
     ctx = project.deploy(n1)
@@ -104,11 +101,11 @@ def test_boot_vm(project, keystone, nova, neutron):
     ctx = project.deploy(h1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
-    server = nova.servers.find(name=name)
+    server = nova_multi.servers.find(name=name)
     assert server is not None
 
     # cleanup
-    project.compile(get_model(name, key, purged=True))
+    project.compile(get_model(name, key, os_credentials_multi, purged=True))
 
     h1 = project.get_resource("openstack::VirtualMachine", name=name)
     ctx = project.deploy(h1)
@@ -119,7 +116,7 @@ def test_boot_vm(project, keystone, nova, neutron):
         count = 0
         while count < 10:
             time.sleep(1)
-            server = nova.servers.find(name=name)
+            server = nova_multi.servers.find(name=name)
             count += 1
 
         assert False, "VM should be gone in 10 seconds"
@@ -128,7 +125,7 @@ def test_boot_vm(project, keystone, nova, neutron):
 
     count = 0
     while server is not None and count < 60:
-        ports = neutron.list_ports(device_id=server.id)
+        ports = neutron_multi.list_ports(device_id=server.id)
         if len(ports["ports"]) > 0:
             time.sleep(1)
             count += 1
@@ -146,28 +143,28 @@ def test_boot_vm(project, keystone, nova, neutron):
     assert ctx.status == inmanta.const.ResourceState.deployed
 
     try:
-        server = nova.servers.find(name=name)
+        server = nova_multi.servers.find(name=name)
         server.delete()
     except Exception:
         pass
 
     try:
-        nova.keypairs.find(name=name).delete()
+        nova_multi.keypairs.find(name=name).delete()
     except Exception:
         pass
 
-    networks = neutron.list_subnets(name=s1.name)["subnets"]
+    networks = neutron_multi.list_subnets(name=s1.name)["subnets"]
     if len(networks) > 0:
         for network in networks:
-            neutron.delete_subnet(network["id"])
+            neutron_multi.delete_subnet(network["id"])
 
-    networks = neutron.list_networks(name=n1.name)["networks"]
+    networks = neutron_multi.list_networks(name=n1.name)["networks"]
     if len(networks) > 0:
         for network in networks:
-            neutron.delete_network(network["id"])
+            neutron_multi.delete_network(network["id"])
 
 
-def test_59_find_flavor_exception(project, keystone, nova) -> None:
+def test_59_find_flavor_exception(project, keystone, nova, os_credentials) -> None:
     name = "inmanta-unit-test"
     key = (
         "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
@@ -180,4 +177,4 @@ def test_59_find_flavor_exception(project, keystone, nova) -> None:
         ExplicitPluginException,
         match=f"Couldn't find a flavor with at least {cpus} unpinned CPUs and {ram} Gigabytes of RAM",
     ):
-        project.compile(get_model(name, key, flavor_constraints=(cpus, ram)))
+        project.compile(get_model(name, key, os_credentials, flavor_constraints=(cpus, ram)))
