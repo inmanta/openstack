@@ -823,44 +823,77 @@ class OpenStackHandler(CRUDHandler):
         return sess
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_nova_client(self, auth_url, project, admin_user, admin_password, verify_cert):
+    def get_nova_client(
+        self, auth_url, project, admin_user, admin_password, verify_cert
+    ):
         return nova_client.Client(
             "2.1",
-            session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert),
+            session=self.get_session(
+                auth_url, project, admin_user, admin_password, verify_cert
+            ),
         )
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_neutron_client(self, auth_url, project, admin_user, admin_password, verify_cert):
+    def get_neutron_client(
+        self, auth_url, project, admin_user, admin_password, verify_cert
+    ):
         return neutron_client.Client(
             "2.0",
-            session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert),
+            session=self.get_session(
+                auth_url, project, admin_user, admin_password, verify_cert
+            ),
         )
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_keystone_client(self, auth_url, project, admin_user, admin_password, verify_cert):
+    def get_keystone_client(
+        self, auth_url, project, admin_user, admin_password, verify_cert
+    ):
         return keystone_client.Client(
-            session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert)
+            session=self.get_session(
+                auth_url, project, admin_user, admin_password, verify_cert
+            )
         )
 
     @cache(timeout=CRED_TIMEOUT)
-    def get_glance_client(self, auth_url, project, admin_user, admin_password, verify_cert):
+    def get_glance_client(
+        self, auth_url, project, admin_user, admin_password, verify_cert
+    ):
         return glance_client.Client(
-            "2", session=self.get_session(auth_url, project, admin_user, admin_password, verify_cert)
+            "2",
+            session=self.get_session(
+                auth_url, project, admin_user, admin_password, verify_cert
+            ),
         )
 
     def pre(self, ctx, resource):
         project = resource.admin_tenant
         self._nova = self.get_nova_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
+            resource.auth_url,
+            project,
+            resource.admin_user,
+            resource.admin_password,
+            resource.verify_cert,
         )
         self._neutron = self.get_neutron_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
+            resource.auth_url,
+            project,
+            resource.admin_user,
+            resource.admin_password,
+            resource.verify_cert,
         )
         self._keystone = self.get_keystone_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
+            resource.auth_url,
+            project,
+            resource.admin_user,
+            resource.admin_password,
+            resource.verify_cert,
         )
         self._glance = self.get_glance_client(
-            resource.auth_url, project, resource.admin_user, resource.admin_password, resource.verify_cert
+            resource.auth_url,
+            project,
+            resource.admin_user,
+            resource.admin_password,
+            resource.verify_cert,
         )
 
     def post(self, ctx, resource):
@@ -880,7 +913,7 @@ class OpenStackHandler(CRUDHandler):
                 resource.project,
                 resource.admin_user,
                 resource.admin_password,
-                resource.verify_cert
+                resource.verify_cert,
             )
             return session.get_project_id()
 

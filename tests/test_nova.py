@@ -76,7 +76,9 @@ vm = openstack::Host(
     """
 
 
-def test_boot_vm(project, keystone_multi, nova_multi, neutron_multi, os_credentials_multi):
+def test_boot_vm(
+    project, keystone_multi, nova_multi, neutron_multi, os_credentials_multi
+):
     name = "inmanta-unit-test"
     key = (
         "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
@@ -177,4 +179,6 @@ def test_59_find_flavor_exception(project, keystone, nova, os_credentials) -> No
         ExplicitPluginException,
         match=f"Couldn't find a flavor with at least {cpus} unpinned CPUs and {ram} Gigabytes of RAM",
     ):
-        project.compile(get_model(name, key, os_credentials, flavor_constraints=(cpus, ram)))
+        project.compile(
+            get_model(name, key, os_credentials, flavor_constraints=(cpus, ram))
+        )

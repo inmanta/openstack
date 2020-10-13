@@ -144,7 +144,9 @@ class PackStackVM:
         try:
             for port in [8774, 5000, 9292, 9696, 8778, 8776, 5001]:
                 if port == 5001:
-                    requests.get(f"https://{self.PACKSTACK_IP}:{port}", timeout=5, verify=False)
+                    requests.get(
+                        f"https://{self.PACKSTACK_IP}:{port}", timeout=5, verify=False
+                    )
                 else:
                     requests.get(f"http://{self.PACKSTACK_IP}:{port}", timeout=5)
         except requests.RequestException:
@@ -174,8 +176,14 @@ def create_packstack_vm():
 
 
 class OpenstackCredentials:
-
-    def __init__(self, auth_url: str, username: str, password: str, project_name: str, verify_cert: bool = True) -> None:
+    def __init__(
+        self,
+        auth_url: str,
+        username: str,
+        password: str,
+        project_name: str,
+        verify_cert: bool = True,
+    ) -> None:
         self.auth_url = auth_url
         self.username = username
         self.password = password
@@ -189,11 +197,13 @@ def os_credentials() -> OpenstackCredentials:
         auth_url=os.environ["OS_AUTH_URL"],
         username=os.environ["OS_USERNAME"],
         password=os.environ["OS_PASSWORD"],
-        project_name=os.environ["OS_PROJECT_NAME"]
+        project_name=os.environ["OS_PROJECT_NAME"],
     )
 
 
-@pytest.fixture(scope="session", params=[True, False], ids=["with_self_signed_cert", "no_cert"])
+@pytest.fixture(
+    scope="session", params=[True, False], ids=["with_self_signed_cert", "no_cert"]
+)
 def os_credentials_multi(request) -> OpenstackCredentials:
     use_self_signed_certificate = request.param
     if use_self_signed_certificate:
@@ -205,7 +215,7 @@ def os_credentials_multi(request) -> OpenstackCredentials:
         username=os.environ[f"OS_USERNAME{env_var_postfix}"],
         password=os.environ[f"OS_PASSWORD{env_var_postfix}"],
         project_name=os.environ[f"OS_PROJECT_NAME{env_var_postfix}"],
-        verify_cert=not use_self_signed_certificate
+        verify_cert=not use_self_signed_certificate,
     )
 
 
@@ -216,7 +226,7 @@ def session(os_credentials):
         os_credentials.username,
         os_credentials.password,
         os_credentials.project_name,
-        os_credentials.verify_cert
+        os_credentials.verify_cert,
     )
 
 
@@ -227,7 +237,7 @@ def session_multi(os_credentials_multi):
         os_credentials_multi.username,
         os_credentials_multi.password,
         os_credentials_multi.project_name,
-        os_credentials_multi.verify_cert
+        os_credentials_multi.verify_cert,
     )
 
 
@@ -318,7 +328,7 @@ class Project(object):
                 username=self._username,
                 password=self._password,
                 tenant=self._tenant,
-                verify_cert=self._verify_cert
+                verify_cert=self._verify_cert,
             )
         return self._session_obj
 
@@ -367,7 +377,7 @@ class OpenstackTester(object):
                 self.os_admin_credentials.username,
                 self.os_admin_credentials.password,
                 self.os_admin_credentials.project_name,
-                self.os_admin_credentials.verify_cert
+                self.os_admin_credentials.verify_cert,
             )
         return self._admin
 
@@ -387,7 +397,7 @@ class OpenstackTester(object):
             self.os_admin_credentials.username,
             self.os_admin_credentials.password,
             prefixed_tenant,
-            self.os_admin_credentials.verify_cert
+            self.os_admin_credentials.verify_cert,
         )
 
         self._projects[name] = prj
