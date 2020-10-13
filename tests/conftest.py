@@ -52,7 +52,9 @@ class PackStackVM:
         self._neutron_client = neutron_client.Client("2.0", session=session)
         self._glance_client = glance_client.Client(session=session)
         self._packstack_ip = self._get_environment_variable("PACKSTACK_IP")
-        self._packstack_network_id = self._get_environment_variable("PACKSTACK_NETWORK_ID")
+        self._packstack_network_id = self._get_environment_variable(
+            "PACKSTACK_NETWORK_ID"
+        )
         self._server: Optional[Server] = None
 
     def _get_environment_variable(self, env_var_name) -> str:
@@ -89,11 +91,6 @@ class PackStackVM:
 
     def _create_vm(self) -> None:
         LOGGER.info("Creating packstack VM")
-        path_to_userdata_file = os.path.join(
-            os.path.dirname(__file__), "..", "ci", "user_data"
-        )
-        with open(path_to_userdata_file, "r") as f:
-            user_data = f.read()
         flavor_id = self._nova_client.flavors.find(name=self.FLAVOR_NAME).id
         image_ids = [
             image.id
@@ -106,10 +103,8 @@ class PackStackVM:
         self._server = self._nova_client.servers.create(
             name=self.PACKSTACK_VM_NAME,
             flavor=flavor_id,
-            userdata=user_data,
             nics=[{"net-id": self._packstack_network_id}],
             image=image_id,
-            config_drive=True,
         )
         LOGGER.info("Waiting until the VM enters the active state")
         self._wait_until(
