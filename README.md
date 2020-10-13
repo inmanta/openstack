@@ -20,7 +20,7 @@ export INMANTA_TEST_ENV=/tmp/env
 ```bash
 export INMANTA_MODULE_REPO=git@github.com:inmanta/
 
-# Connection details of packstack
+# Connection details of openstack instance
 export OS_AUTH_URL=
 # Auth URL for endpoint serving a self-signed certificate
 export OS_AUTH_URL_SS=
