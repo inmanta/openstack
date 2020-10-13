@@ -38,10 +38,8 @@ PREFIX = "inmanta_unit_test_"
 
 class PackStackVM:
 
-    PACKSTACK_IP: str = "192.168.26.19"
     IMAGE_NAME: str = "packstack-snapshot"
     FLAVOR_NAME: str = "c4m16d20"
-    NETWORK_ID: str = "606ad54f-834f-4e9e-9e91-af0b7fb03d8e"
     PACKSTACK_VM_NAME: str = "packstack"
 
     def __init__(self) -> None:
@@ -53,6 +51,8 @@ class PackStackVM:
         self._nova_client = nova_client.Client("2", session=session)
         self._neutron_client = neutron_client.Client("2.0", session=session)
         self._glance_client = glance_client.Client(session=session)
+        self._packstack_ip = self._get_environment_variable("PACKSTACK_IP")
+        self._packstack_network_id = self._get_environment_variable("PACKSTACK_NETWORK_ID")
         self._server: Optional[Server] = None
 
     def _get_environment_variable(self, env_var_name) -> str:
@@ -107,7 +107,7 @@ class PackStackVM:
             name=self.PACKSTACK_VM_NAME,
             flavor=flavor_id,
             userdata=user_data,
-            nics=[{"net-id": self.NETWORK_ID}],
+            nics=[{"net-id": self._packstack_network_id}],
             image=image_id,
             config_drive=True,
         )
@@ -145,10 +145,10 @@ class PackStackVM:
             for port in [8774, 5000, 9292, 9696, 8778, 8776, 5001]:
                 if port == 5001:
                     requests.get(
-                        f"https://{self.PACKSTACK_IP}:{port}", timeout=5, verify=False
+                        f"https://{self._packstack_ip}:{port}", timeout=5, verify=False
                     )
                 else:
-                    requests.get(f"http://{self.PACKSTACK_IP}:{port}", timeout=5)
+                    requests.get(f"http://{self._packstack_ip}:{port}", timeout=5)
         except requests.RequestException:
             LOGGER.debug("Port %d not up", port)
             return False
