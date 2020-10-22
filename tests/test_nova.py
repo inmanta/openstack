@@ -61,6 +61,10 @@ subnet = openstack::Subnet(
     network_address="10.255.255.0/24",
     purged={str(purged).lower()},
 )
+security_group = openstack::SecurityGroup(provider=p, project=project, name="{name}")
+openstack::IPrule(group=security_group, direction="egress", ip_protocol="all", remote_prefix="0.0.0.0/0")
+openstack::IPrule(group=security_group, direction="ingress", ip_protocol="icmp", remote_prefix="0.0.0.0/0")
+openstack::IPrule(group=security_group, direction="ingress", ip_protocol="tcp", port=22, remote_prefix="0.0.0.0/0")
 vm = openstack::Host(
     provider=p,
     project=project,
@@ -71,6 +75,7 @@ vm = openstack::Host(
     flavor=openstack::find_flavor(p, {", ".join(map(str, flavor_constraints))}),
     user_data="",
     subnet=subnet,
+    security_groups=[security_group],
     purged={str(purged).lower()},
 )
     """
