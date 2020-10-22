@@ -1074,9 +1074,7 @@ class OpenStackHandler(CRUDHandler):
         """
         Get security group details from openstack
         """
-        if (name is None and group_id is None) or (
-            name is not None and group_id is not None
-        ):
+        if (name is None) == (group_id is None):
             raise Exception(
                 "Argument 'name' or 'group_id' should be provided, but never both"
             )
