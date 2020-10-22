@@ -1,5 +1,5 @@
 #3.6.1
-- Fix scoping issue on SecurityGroup resource
+- Fix scoping issue on SecurityGroup resource (#184)
 
 #3.6.0
 - Add support to disable SSL verification (#152)
