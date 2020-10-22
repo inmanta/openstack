@@ -480,6 +480,75 @@ vm2.vm.security_groups=[sg_mgmt]
     assert ctx.status == inmanta.const.ResourceState.deployed
 
 
+def test_scoping_on_security_group_resource(project, openstack, neutron):
+    """
+    Verify that the SecurityGroup resource respects the scope of the project.
+    """
+    project1 = openstack.get_project("inmanta_unit_test1")
+    project2 = openstack.get_project("inmanta_unit_test2")
+
+    description_sec_group1 = "test"
+    description_sec_group2 = "other description"
+
+    resource_name = project1.get_resource_name("sec_group")
+
+    # Make sure resource exists in project1
+    project1.neutron.create_security_group(
+        {
+            "security_group": {
+                "name": resource_name,
+                "description": description_sec_group1,
+            }
+        }
+    )
+
+    # Deploy resource with same name in other project
+    project.compile(
+        f"""
+import unittest
+import openstack
+
+tenant = "{project2._tenant}"
+p = openstack::Provider(name="test", connection_url=std::get_env("OS_AUTH_URL"), username=std::get_env("OS_USERNAME"),
+                        password=std::get_env("OS_PASSWORD"), tenant=tenant)
+project = openstack::Project(provider=p, name=tenant, description="test", enabled=true, managed=false)
+
+rule1 = openstack::IPrule(ip_protocol="all", port=0, direction="egress", remote_prefix="0.0.0.0/0")
+rule2 = openstack::IPrule(ip_protocol="tcp", port=8888, direction="ingress", remote_prefix="0.0.0.0/0")
+rule3 = openstack::IPrule(ip_protocol="tcp", port=22, direction="ingress", remote_prefix="0.0.0.0/0")
+rule4 = openstack::IPrule(ip_protocol="tcp", port=5432, direction="ingress", remote_prefix="0.0.0.0/0")
+security_group = openstack::SecurityGroup(
+                            name="{resource_name}",
+                            description="{description_sec_group2}",
+                            provider=p,
+                            project=project,
+                            rules=[rule1, rule2, rule3, rule4]
+)
+        """
+    )
+
+    project.deploy_resource("openstack::SecurityGroup")
+
+    sgs = project1.neutron.list_security_groups(
+        name=resource_name, project_id=project1.project_object.id
+    )
+    assert len(sgs["security_groups"]) == 1
+    assert sgs["security_groups"][0]["project_id"] == project1.project_object.id
+    assert sgs["security_groups"][0]["description"] == description_sec_group1
+    assert (
+        len(sgs["security_groups"][0]["security_group_rules"]) == 2
+    )  # default rules: 1) egress IPv4 and 2) egress IPv6
+
+    sgs = project2.neutron.list_security_groups(
+        name=resource_name, project_id=project2.project_object.id
+    )
+    assert len(sgs["security_groups"]) == 1
+    assert sgs["security_groups"][0]["project_id"] == project2.project_object.id
+    assert sgs["security_groups"][0]["description"] == description_sec_group2
+    # Rules with ip_protocol=all expand to two rules in openstack
+    assert len(sgs["security_groups"][0]["security_group_rules"]) == 5
+
+
 def test_shared_network(project, openstack):
     """
     Create a shared network as one tenant and add ports to it as another tenant
