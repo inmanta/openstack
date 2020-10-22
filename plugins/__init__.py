@@ -1436,9 +1436,9 @@ class VirtualMachineHandler(OpenStackHandler):
             self._create_nic_config(p) for p in no_sort
         ]
 
-    def _build_sg_list(self, ctx, security_groups):
+    def _build_sg_list(self, ctx, resource: resources.PurgeableResource):
         sg_list = []
-        for group in security_groups:
+        for group in resource.security_groups:
             project_id = self.get_project_id(resource, resource.project)
             sg = self.get_security_group(ctx, project_id=project_id, name=group)
             if sg is not None:
@@ -1484,7 +1484,7 @@ class VirtualMachineHandler(OpenStackHandler):
             flavor=flavor.id,
             userdata=resource.user_data,
             nics=nics,
-            security_groups=self._build_sg_list(ctx, resource.security_groups),
+            security_groups=self._build_sg_list(ctx, resource),
             image=resource.image,
             key_name=resource.key_name,
             config_drive=resource.config_drive,
