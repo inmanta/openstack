@@ -1070,14 +1070,21 @@ class OpenStackHandler(CRUDHandler):
         else:
             return vms[0]
 
-    def get_security_group(self, ctx, name=None, group_id=None):
+    def get_security_group(self, ctx, project_id, name=None, group_id=None):
         """
         Get security group details from openstack
         """
+        if (name is None and group_id is None) or (
+            name is not None and group_id is not None
+        ):
+            raise Exception(
+                "Argument 'name' or 'group_id' should be provided, but never both"
+            )
+
         if name is not None:
-            sgs = self._neutron.list_security_groups(name=name)
+            sgs = self._neutron.list_security_groups(project_id=project_id, name=name)
         elif group_id is not None:
-            sgs = self._neutron.list_security_groups(id=group_id)
+            sgs = self._neutron.list_security_groups(project_id=project_id, id=group_id)
 
         if len(sgs["security_groups"]) == 0:
             return None
@@ -1434,7 +1441,8 @@ class VirtualMachineHandler(OpenStackHandler):
     def _build_sg_list(self, ctx, security_groups):
         sg_list = []
         for group in security_groups:
-            sg = self.get_security_group(ctx, name=group)
+            project_id = self.get_project_id(resource, resource.project)
+            sg = self.get_security_group(ctx, project_id=project_id, name=group)
             if sg is not None:
                 sg_list.append(sg["name"])
         return sg_list
@@ -2428,7 +2436,10 @@ class SecurityGroupHandler(OpenStackHandler):
                 current_rule["remote_ip_prefix"] = rule["remote_ip_prefix"]
 
             elif rule["remote_group_id"] is not None:
-                rgi = self.get_security_group(ctx, group_id=rule["remote_group_id"])
+                project_id = self.get_project_id(resource, resource.project)
+                rgi = self.get_security_group(
+                    ctx, project_id=project_id, group_id=rule["remote_group_id"]
+                )
                 current_rule["remote_group"] = rgi["name"]
 
             else:
@@ -2445,7 +2456,8 @@ class SecurityGroupHandler(OpenStackHandler):
     def read_resource(
         self, ctx: handler.HandlerContext, resource: SecurityGroup
     ) -> None:
-        sg = self.get_security_group(ctx, name=resource.name)
+        project_id = self.get_project_id(resource, resource.project)
+        sg = self.get_security_group(ctx, project_id=project_id, name=resource.name)
 
         ctx.set("sg", sg)
         if sg is None:
@@ -2506,7 +2518,8 @@ class SecurityGroupHandler(OpenStackHandler):
                 if new_rule["remote_group"] is not None:
                     # lookup the id of the group
                     groups = self._neutron.list_security_groups(
-                        name=new_rule["remote_group"]
+                        project_id=self.get_project_id(resource, resource.project),
+                        name=new_rule["remote_group"],
                     )["security_groups"]
                     if len(groups) == 0:
                         # TODO: log skip rule
@@ -2578,6 +2591,7 @@ class SecurityGroupHandler(OpenStackHandler):
     def update_resource(
         self, ctx: handler.HandlerContext, changes: dict, resource: SecurityGroup
     ) -> None:
+        updated = False
         sg = ctx.get("sg")
         if "name" in changes or "description" in changes:
             self._neutron.update_security_group(
@@ -2589,7 +2603,7 @@ class SecurityGroupHandler(OpenStackHandler):
                     }
                 },
             )
-            ctx.set_updated()
+            updated = True
 
         if "rules" in changes:
             self._update_rules(
@@ -2598,6 +2612,9 @@ class SecurityGroupHandler(OpenStackHandler):
                 changes["rules"]["current"],
                 changes["rules"]["desired"],
             )
+            updated = True
+
+        if updated:
             ctx.set_updated()
 
     @cache(timeout=5)

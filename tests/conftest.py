@@ -349,6 +349,7 @@ class Project(object):
     def glance(self):
         if self._glance is None:
             self._glance = glance_client.Client(session=self.session)
+        return self._glance
 
     def get_resource_name(self, name: str) -> str:
         return PREFIX + name
@@ -441,6 +442,9 @@ class OpenstackTester(object):
 
             count += 1
 
+        if not ready:
+            raise Exception(f"Failed to cleanup project {prj.project_object.id}")
+
     def clean_project(self, project):
         """
         Clean all the resource in the given project
@@ -467,8 +471,16 @@ class OpenstackTester(object):
                 if network["tenant_id"] == project_id:
                     project.neutron.delete_network(network["id"])
 
+            security_groups = project.neutron.list_security_groups(
+                project_id=project_id
+            )
+            for sec_group in security_groups["security_groups"]:
+                if sec_group["tenant_id"] == project_id:
+                    project.neutron.delete_security_group(sec_group["id"])
+
             for image in project.glance.images.list():
-                project.glance.delete(image.id)
+                if image.name.startswith("inmanta_unit_test"):
+                    project.glance.images.delete(image.id)
 
             return True
         except Exception:
