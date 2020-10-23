@@ -85,6 +85,9 @@ def test_boot_vm(
     project, keystone_multi, nova_multi, neutron_multi, os_credentials_multi
 ):
     name = "inmanta-unit-test"
+
+    project_id = keystone_multi.projects.find(name=os_credentials_multi.project_name).id
+
     key = (
         "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQCsiYV4Cr2lD56bkVabAs2i0WyGSjJbuNHP6IDf8Ru3Pg7DJkz0JaBmETHNjIs+yQ98DNkwH9gZX0"
         "gfrSgX0YfA/PwTatdPf44dwuwWy+cjS2FAqGKdLzNVwLfO5gf74nit4NwATyzakoojHn7YVGnd9ScWfwFNd5jQ6kcLZDq/1w== "
@@ -104,12 +107,43 @@ def test_boot_vm(
     ctx = project.deploy(s1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
+    sg1 = project.get_resource("openstack::SecurityGroup", name=name)
+    ctx = project.deploy(sg1)
+    assert ctx.status == inmanta.const.ResourceState.deployed
+    assert neutron_multi.list_security_groups(project_id=project_id, name=name)
+
     h1 = project.get_resource("openstack::VirtualMachine", name=name)
     ctx = project.deploy(h1)
     assert ctx.status == inmanta.const.ResourceState.deployed
 
     server = nova_multi.servers.find(name=name)
     assert server is not None
+
+    # Get id security group
+    security_groups = neutron_multi.list_security_groups(
+        project_id=project_id, name=name
+    )["security_groups"]
+    assert len(security_groups) == 1
+    sec_group = security_groups[0]
+    assert sec_group["name"] == name
+    # A rule with protocol=all expands to two rules
+    assert len(sec_group["security_group_rules"]) == 4
+    sec_group_id = sec_group["id"]
+
+    # Verify security group is attached to VM
+    attached_security_groups = nova_multi.servers.list_security_group(server=server.id)
+    timeout = 180
+    # Wait until the security group is attached to the VirtualMachine
+    while len(attached_security_groups) == 0:
+        if timeout == 0:
+            raise Exception("Security group didn't get attached to VM")
+        time.sleep(1)
+        timeout -= 1
+        attached_security_groups = nova_multi.servers.list_security_group(
+            server=server.id
+        )
+    assert len(attached_security_groups) == 1
+    assert attached_security_groups[0].id == sec_group_id
 
     # cleanup
     project.compile(get_model(name, key, os_credentials_multi, purged=True))
@@ -169,6 +203,8 @@ def test_boot_vm(
     if len(networks) > 0:
         for network in networks:
             neutron_multi.delete_network(network["id"])
+
+    neutron_multi.delete_security_group(sec_group_id)
 
 
 def test_59_find_flavor_exception(project, keystone, nova, os_credentials) -> None:
