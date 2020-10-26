@@ -15,6 +15,10 @@
 
     Contact: code@inmanta.com
 """
+import uuid
+from dataclasses import dataclass
+from typing import Dict, Optional
+
 import inmanta
 import pytest
 
@@ -307,6 +311,209 @@ openstack::RouterPort(provider=p, project=project, name="%(name)s", router=route
     assert len(neutron.list_subnets(name=subnet.name)["subnets"]) == 0
 
 
+def test_update_rules_in_security_group(project, openstack, neutron):
+    os_project = openstack.get_project("test")
+    resource_name_sec_group1 = os_project.get_resource_name("sec_group1")
+    resource_name_sec_group2 = os_project.get_resource_name("sec_group2")
+    resource_name_sec_group3 = os_project.get_resource_name("sec_group3")
+
+    project.compile(
+        f"""
+import unittest
+import openstack
+
+tenant = "{os_project._tenant}"
+p = openstack::Provider(
+            name="test",
+            connection_url="{os_project._auth_url}",
+            username="{os_project._username}",
+            password="{os_project._password}",
+            tenant=tenant)
+project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+
+sg_base = openstack::SecurityGroup(provider=p, project=project, name="{resource_name_sec_group1}", description="test")
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port_min=200,
+            port_max=201,
+            remote_prefix="0.0.0.0/0"
+)
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port_min=300,
+            port_max=301,
+            remote_prefix="0.0.0.0/0"
+)
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port_min=400,
+            port_max=401,
+            remote_prefix="0.0.0.0/0"
+)
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port_min=500,
+            port_max=501,
+            remote_prefix="0.0.0.0/0"
+)
+openstack::GroupRule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port=222,
+            remote_group=sg_base2
+)
+
+sg_base2 = openstack::SecurityGroup(provider=p, project=project, name="{resource_name_sec_group2}", description="test")
+openstack::IPrule(
+            group=sg_base2,
+            direction="ingress",
+            ip_protocol="tcp",
+            port=8080,
+            remote_prefix="0.0.0.0/0"
+)
+        """
+    )
+
+    @dataclass(frozen=True)
+    class Rule:
+        direction: str
+        protocol: str
+        port_range_min: int
+        port_range_max: int
+        remote_ip_prefix: Optional[str]
+        remote_group_id: Optional[uuid.UUID]
+
+        @classmethod
+        def from_dict(cls, dct: Dict):
+            return Rule(
+                direction=dct["direction"],
+                protocol=dct["protocol"],
+                port_range_min=dct["port_range_min"],
+                port_range_max=dct["port_range_max"],
+                remote_ip_prefix=dct["remote_ip_prefix"],
+                remote_group_id=dct["remote_group_id"],
+            )
+
+    project.deploy_resource("openstack::SecurityGroup", name=resource_name_sec_group2)
+    project.deploy_resource("openstack::SecurityGroup", name=resource_name_sec_group1)
+    sgs = neutron.list_security_groups(
+        project_id=os_project.project_object.id, name=resource_name_sec_group1
+    )["security_groups"]
+    assert len(sgs) == 1
+    actual_rules = set(
+        Rule.from_dict(dct)
+        for dct in sgs[0]["security_group_rules"]
+        if dct["ethertype"] == "IPv4"
+    )
+    assert len(actual_rules) == 5
+    assert Rule("ingress", "tcp", 200, 201, "0.0.0.0/0", None) in actual_rules
+    assert Rule("ingress", "tcp", 300, 301, "0.0.0.0/0", None) in actual_rules
+    assert Rule("ingress", "tcp", 400, 401, "0.0.0.0/0", None) in actual_rules
+    assert Rule("ingress", "tcp", 500, 501, "0.0.0.0/0", None) in actual_rules
+    remote_group_id1 = [r.remote_group_id for r in actual_rules if r.remote_group_id][0]
+    assert Rule("ingress", "tcp", 222, 222, None, remote_group_id1) in actual_rules
+
+    project.compile(
+        f"""
+import unittest
+import openstack
+
+tenant = "{os_project._tenant}"
+p = openstack::Provider(
+            name="test",
+            connection_url="{os_project._auth_url}",
+            username="{os_project._username}",
+            password="{os_project._password}",
+            tenant=tenant)
+project = openstack::Project(provider=p, name=tenant, description="", enabled=true, managed=false)
+
+sg_base = openstack::SecurityGroup(provider=p, project=project, name="{resource_name_sec_group1}", description="test")
+# Update direction
+openstack::IPrule(
+            group=sg_base,
+            direction="egress",
+            ip_protocol="tcp",
+            port_min=200,
+            port_max=201,
+            remote_prefix="0.0.0.0/0"
+)
+# Update protocol
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="udp",
+            port_min=300,
+            port_max=301,
+            remote_prefix="0.0.0.0/0"
+)
+# Update port
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port_min=900,
+            port_max=901,
+            remote_prefix="0.0.0.0/0"
+)
+# Update remote prefix
+openstack::IPrule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port_min=500,
+            port_max=501,
+            remote_prefix="192.168.0.0/24"
+)
+# Attach new remote_group
+openstack::GroupRule(
+            group=sg_base,
+            direction="ingress",
+            ip_protocol="tcp",
+            port=222,
+            remote_group=sg_base3
+)
+
+sg_base3 = openstack::SecurityGroup(provider=p, project=project, name="{resource_name_sec_group3}", description="test")
+openstack::IPrule(
+            group=sg_base3,
+            direction="ingress",
+            ip_protocol="tcp",
+            port=80,
+            remote_prefix="0.0.0.0/0"
+)
+        """
+    )
+
+    project.deploy_resource("openstack::SecurityGroup", name=resource_name_sec_group3)
+    project.deploy_resource("openstack::SecurityGroup", name=resource_name_sec_group1)
+    sgs = neutron.list_security_groups(
+        project_id=os_project.project_object.id, name=resource_name_sec_group1
+    )["security_groups"]
+    assert len(sgs) == 1
+    actual_rules = set(
+        Rule.from_dict(dct)
+        for dct in sgs[0]["security_group_rules"]
+        if dct["ethertype"] == "IPv4"
+    )
+    assert len(actual_rules) == 5
+    assert Rule("egress", "tcp", 200, 201, "0.0.0.0/0", None) in actual_rules
+    assert Rule("ingress", "udp", 300, 301, "0.0.0.0/0", None) in actual_rules
+    assert Rule("ingress", "tcp", 900, 901, "0.0.0.0/0", None) in actual_rules
+    assert Rule("ingress", "tcp", 500, 501, "192.168.0.0/24", None) in actual_rules
+    remote_group_id2 = [r.remote_group_id for r in actual_rules if r.remote_group_id][0]
+    assert remote_group_id1 != remote_group_id2
+    assert Rule("ingress", "tcp", 222, 222, None, remote_group_id2) in actual_rules
+
+
 def test_security_group(project, neutron):
     name = "inmanta_unit_test"
     sgs = neutron.list_security_groups(name=name)
@@ -535,9 +742,12 @@ security_group = openstack::SecurityGroup(
     assert len(sgs["security_groups"]) == 1
     assert sgs["security_groups"][0]["project_id"] == project1.project_object.id
     assert sgs["security_groups"][0]["description"] == description_sec_group1
-    assert (
-        len(sgs["security_groups"][0]["security_group_rules"]) == 2
-    )  # default rules: 1) egress IPv4 and 2) egress IPv6
+    ipv4_rules = [
+        r
+        for r in sgs["security_groups"][0]["security_group_rules"]
+        if r["ethertype"] == "IPv4"
+    ]
+    assert len(ipv4_rules) == 1  # Egress is allowed by default
 
     sgs = project2.neutron.list_security_groups(
         name=resource_name, project_id=project2.project_object.id
@@ -545,8 +755,12 @@ security_group = openstack::SecurityGroup(
     assert len(sgs["security_groups"]) == 1
     assert sgs["security_groups"][0]["project_id"] == project2.project_object.id
     assert sgs["security_groups"][0]["description"] == description_sec_group2
-    # Rules with ip_protocol=all expand to two rules in openstack
-    assert len(sgs["security_groups"][0]["security_group_rules"]) == 5
+    ipv4_rules = [
+        r
+        for r in sgs["security_groups"][0]["security_group_rules"]
+        if r["ethertype"] == "IPv4"
+    ]
+    assert len(ipv4_rules) == 4
 
 
 def test_shared_network(project, openstack):
