@@ -2418,7 +2418,7 @@ class HostPortHandler(OpenStackHandler):
 
 @provider("openstack::SecurityGroup", name="openstack")
 class SecurityGroupHandler(OpenStackHandler):
-    def _build_current_rules(self, ctx, security_group):
+    def _build_current_rules(self, ctx, project_id, security_group):
         rules = []
         for rule in security_group["security_group_rules"]:
             if rule["ethertype"] != "IPv4":
@@ -2434,7 +2434,6 @@ class SecurityGroupHandler(OpenStackHandler):
                 current_rule["remote_ip_prefix"] = rule["remote_ip_prefix"]
 
             elif rule["remote_group_id"] is not None:
-                project_id = self.get_project_id(resource, resource.project)
                 rgi = self.get_security_group(
                     ctx, project_id=project_id, group_id=rule["remote_group_id"]
                 )
@@ -2455,6 +2454,7 @@ class SecurityGroupHandler(OpenStackHandler):
         self, ctx: handler.HandlerContext, resource: SecurityGroup
     ) -> None:
         project_id = self.get_project_id(resource, resource.project)
+        ctx.set("project_id", project_id)
         sg = self.get_security_group(ctx, project_id=project_id, name=resource.name)
 
         ctx.set("sg", sg)
@@ -2463,7 +2463,7 @@ class SecurityGroupHandler(OpenStackHandler):
 
         resource.purged = False
         resource.description = sg["description"]
-        resource.rules = self._build_current_rules(ctx, sg)
+        resource.rules = self._build_current_rules(ctx, project_id, sg)
 
     def _compare_rule(self, old, new):
         old_keys = set([x for x in old.keys() if not x.startswith("__")])
@@ -2560,7 +2560,9 @@ class SecurityGroupHandler(OpenStackHandler):
                 }
             }
         )
-        current_rules = self._build_current_rules(ctx, sg["security_group"])
+        current_rules = self._build_current_rules(
+            ctx, ctx.get("project_id"), sg["security_group"]
+        )
         self._update_rules(
             sg["security_group"]["id"], resource, current_rules, resource.rules
         )

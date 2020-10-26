@@ -1,3 +1,6 @@
+#3.6.3
+- Fix type object 'resource' has no attribute 'project'
+
 #3.6.2
 - Fix type object 'resource' has no attribute 'project'
 
