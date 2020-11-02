@@ -1,3 +1,6 @@
+#3.6.4
+- Downgrade prettytable dependency to resolve dependency conflict.
+
 #3.6.3
 - Fix type object 'resource' has no attribute 'project'
 
