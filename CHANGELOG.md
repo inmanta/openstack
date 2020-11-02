@@ -1,3 +1,6 @@
+#3.6.4
+- Remove the prettytable dependency.
+
 #3.6.3
 - Fix type object 'resource' has no attribute 'project'
 
