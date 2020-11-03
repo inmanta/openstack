@@ -1,3 +1,6 @@
+#3.6.6
+- Downgrade cryptography to maintain compatibility with openssl 1.0.2
+
 #3.6.5
 - Remove the importlib-resources dependency
 
