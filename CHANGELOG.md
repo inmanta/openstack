@@ -1,3 +1,6 @@
+#3.6.5
+- Remove the importlib-resources dependency
+
 #3.6.4
 - Remove the prettytable dependency.
 
