@@ -1,3 +1,6 @@
+#3.6.7
+- Pin cryptography dependency to the correct version (inmanta/infra-tickets#93)
+
 #3.6.6
 - Downgrade cryptography to maintain compatibility with openssl 1.0.2 (inmanta/infra-tickets#93)
 
