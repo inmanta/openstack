@@ -1,3 +1,6 @@
+#3.6.8
+- Use inmanta-dev-dependencies package
+
 #3.6.7
 - Pin cryptography dependency to the correct version (inmanta/infra-tickets#93)
 
