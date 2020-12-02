@@ -1,3 +1,6 @@
+#3.6.9
+- Remove transitive dependencies
+
 #3.6.8
 - Use inmanta-dev-dependencies package
 
