@@ -1,5 +1,5 @@
 author: Inmanta <code@inmanta.com>
 license: Apache 2.0
 name: openstack
-version: 3.6.9
+version: 3.6.10.dev1606982598
 compiler_version: 2020.2

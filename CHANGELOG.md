@@ -1,3 +1,6 @@
+#3.6.10
+- Pin PyOpenssl for compatibility with openssl 1.0.2
+
 #3.6.9
 - Remove transitive dependencies
 
