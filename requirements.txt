@@ -4,5 +4,5 @@ python-novaclient~=17.2
 python-neutronclient~=7.2
 python-glanceclient<3.3
 
-pyOpenSSL~=19.1.0
-cryptography~=3.1.0
+pyOpenSSL~=20.0.0
+cryptography~=3.3.0
