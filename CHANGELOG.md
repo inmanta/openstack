@@ -1,3 +1,6 @@
+#3.6.11
+- Add setuptools-rust dependency required to build the cryptography package.
+
 #3.6.10
 - Pin PyOpenssl for compatibility with openssl 1.0.2
 
