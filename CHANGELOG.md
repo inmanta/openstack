@@ -1,40 +1,42 @@
-#3.6.11
+# 3.6.12 
+- Update inmanta-dev-dependencies package
+# 3.6.11
 - Add setuptools-rust dependency required to build the cryptography package.
 
-#3.6.10
+# 3.6.10
 - Pin PyOpenssl for compatibility with openssl 1.0.2
 
-#3.6.9
+# 3.6.9
 - Remove transitive dependencies
 
-#3.6.8
+# 3.6.8
 - Use inmanta-dev-dependencies package
 
-#3.6.7
+# 3.6.7
 - Pin cryptography dependency to the correct version (inmanta/infra-tickets#93)
 
-#3.6.6
+# 3.6.6
 - Downgrade cryptography to maintain compatibility with openssl 1.0.2 (inmanta/infra-tickets#93)
 
-#3.6.5
+# 3.6.5
 - Remove the importlib-resources dependency
 
-#3.6.4
+# 3.6.4
 - Remove the prettytable dependency.
 
-#3.6.3
+# 3.6.3
 - Fix type object 'resource' has no attribute 'project'
 
-#3.6.2
+# 3.6.2
 - Fix type object 'resource' has no attribute 'project'
 
-#3.6.1
-- Fix scoping issue on SecurityGroup resource (#184)
+# 3.6.1
+- Fix scoping issue on SecurityGroup resource (# 184)
 
-#3.6.0
-- Add support to disable SSL verification (#152)
+# 3.6.0
+- Add support to disable SSL verification (# 152)
 
-#3.5.6
+# 3.5.6
 - Raise a `PluginException` when `find_flavor` fails to find a matching flavor.
 
 # 3.5.5
