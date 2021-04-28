@@ -1,0 +1,14 @@
+version: 2
+updates:
+- package-ecosystem: pip
+  directory: "/"
+  schedule:
+    interval: daily
+  open-pull-requests-limit: 99
+  ignore:
+  - dependency-name: cryptography
+    versions:
+    - "> 3.2.1"
+  - dependency-name: pyopenssl
+    versions:
+    - "> 19.1"
