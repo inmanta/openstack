@@ -4,6 +4,6 @@ python-novaclient~=17.4
 python-neutronclient~=7.3
 python-glanceclient<3.4
 
-pyOpenSSL~=19.1.0
+pyOpenSSL~=20.0.1
 cryptography~=3.4.7
 setuptools-rust~=0.12.1
