@@ -1,3 +1,5 @@
+# 3.6.13
+- Tune caching to prevent double creation of VM's
 # 3.6.12 
 - Update inmanta-dev-dependencies package
 # 3.6.11
