@@ -1356,7 +1356,7 @@ class ImageHandler(OpenStackHandler):
 
 @provider("openstack::VirtualMachine", name="openstack")
 class VirtualMachineHandler(OpenStackHandler):
-    @cache(timeout=10)
+    @cache(timeout=1, cache_none=False)
     def get_vm(self, ctx, resource):
         if resource.project == resource.admin_tenant:
             servers = self._nova.servers.list(search_opts={"name": resource.name})
@@ -1394,7 +1394,7 @@ class VirtualMachineHandler(OpenStackHandler):
                 "Multiple virtual machines with name %s exist." % resource.name
             )
 
-    @cache(timeout=10)
+    @cache(timeout=10, cache_none=False)
     def _port_id(self, port_name):
         ports = self._neutron.list_ports(name=port_name)
         if len(ports["ports"]) > 0:
@@ -1402,7 +1402,7 @@ class VirtualMachineHandler(OpenStackHandler):
 
         return None
 
-    @cache(timeout=10)
+    @cache(timeout=10, cache_none=False)
     def _get_subnet_id(self, subnet_name):
         subnets = self._neutron.list_subnets(name=subnet_name)
         if len(subnets["subnets"]) > 0:
