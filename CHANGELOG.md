@@ -1,3 +1,6 @@
+#3.7.0
+- Add purge_on_delete option on the Host entity
+
 #3.6.11
 - Add setuptools-rust dependency required to build the cryptography package.
 
