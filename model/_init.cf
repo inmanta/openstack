@@ -421,7 +421,12 @@ VirtualMachine.project [1] -- Project
 VirtualMachine.provider [1] -- Provider.virtual_machines [0:]
 
 entity Host extends ip::Host, VMAttributes:
+    """
+        :attr purged: Set whether this Host should exist or not.
+        :attr purge_on_delete: Purge this Host when it is deleted from the configuration model.
+    """
     bool purged=false
+    bool purge_on_delete=false
 end
 
 Host.vm [1] -- VirtualMachine.host [0:1]
@@ -433,7 +438,7 @@ Host.security_groups [0:] -- SecurityGroup
 
 implementation eth0Port for Host:
     port = HostPort(provider=provider, vm=self.vm, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self.vm, "ip_address"),
-                    project=project, port_index=1, purged=purged)
+                    project=project, port_index=1, purged=purged, purge_on_delete=self.purge_on_delete)
     self.vm.eth0_port = port
     self.ip = port.address
 end
@@ -443,7 +448,7 @@ implement Host using eth0Port when subnet is defined
 implementation openstackVM for Host:
     self.vm = VirtualMachine(name=name, key_pair=key_pair, project=project, provider=provider, user_data=user_data, image=image,
                              flavor=flavor, purged=purged, security_groups=security_groups, config_drive=config_drive,
-                             metadata=self.metadata, personality=self.personality)
+                             metadata=self.metadata, personality=self.personality, purge_on_delete=self.purge_on_delete)
     self.requires = self.vm
 end
 
@@ -524,3 +529,4 @@ entity Image extends OpenStackResource:
 end
 
 implement Image using providerRequire
+

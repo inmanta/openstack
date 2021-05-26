@@ -1,3 +1,5 @@
+# 3.7.0
+- Add purge_on_delete option on the Host entity
 # 3.6.13
 - Tune caching to prevent double creation of VM's
 # 3.6.12 
