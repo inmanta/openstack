@@ -1,9 +1,9 @@
 python-dateutil~=2.8
 python-keystoneclient~=4.2
-python-novaclient~=17.3
+python-novaclient~=17.4
 python-neutronclient~=7.3
-python-glanceclient<3.3
+python-glanceclient<3.4
 
-pyOpenSSL~=19.1.0
-cryptography~=3.1.0
-setuptools-rust~=0.11.6
+pyOpenSSL~=20.0.1
+cryptography~=3.4.7
+setuptools-rust~=0.12.1
