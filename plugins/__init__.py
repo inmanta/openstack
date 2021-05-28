@@ -2187,6 +2187,11 @@ class HostPortHandler(OpenStackHandler):
                         state=vm_state,
                     )
             else:
+                if resource.purged:
+                    # Vm doesn't exist, so we can assume this port doesn't exist either
+                    # We want this port to not exist, so we don't wait
+                    # Solves https://github.com/inmanta/openstack/issues/286
+                    raise ResourcePurged()
                 ctx.info(
                     "VM for port doesn't exist. Waiting and retrying in 5 seconds."
                 )

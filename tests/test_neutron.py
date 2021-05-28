@@ -1001,7 +1001,7 @@ def test_gateway_ip(project, openstack, disable_gateway_ip, gateway_ip):
     assert not changes
 
 
-def test_issue_7(project, openstack):
+def test_issue_7_and_286(project, openstack):
     tenant1 = openstack.get_project("tenant1")
     net_name = tenant1.get_resource_name("net")
     port_name = tenant1.get_resource_name("port")
@@ -1072,4 +1072,11 @@ def test_issue_7(project, openstack):
         "openstack::HostPort",
         name=port_name,
         status=inmanta.const.ResourceState.skipped,
+    )
+
+    project.compile(_get_model(purged=True))
+    # HostPort doesn't exist, so it should succeed.
+    project.deploy_resource(
+        "openstack::HostPort",
+        name=port_name,
     )
