@@ -483,6 +483,7 @@ class HostPort(Port):
         "retries",
         "wait",
         "allowed_address_pairs",
+        "wait_for_vm",
     )
 
     @staticmethod
@@ -499,6 +500,11 @@ class HostPort(Port):
                 pairs[pair.address] = None
 
         return pairs
+
+    @staticmethod
+    def get_wait_for_vm(_, port):
+        """ field used to determine if we expect the VM to be present at all """
+        return not (port.vm.purged)
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
@@ -2187,6 +2193,10 @@ class HostPortHandler(OpenStackHandler):
                         state=vm_state,
                     )
             else:
+                if not resource.wait_for_vm:
+                    # Vm doesn't exist, so we can assume this port doesn't exist either
+                    # see https://github.com/inmanta/openstack/issues/286
+                    raise ResourcePurged()
                 ctx.info(
                     "VM for port doesn't exist. Waiting and retrying in 5 seconds."
                 )

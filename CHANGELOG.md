@@ -1,8 +1,11 @@
+# 3.7.1
+- Ensure correct detection of deleted HostPorts (#286)
+
 # 3.7.0
 - Add purge_on_delete option on the Host entity
 # 3.6.13
 - Tune caching to prevent double creation of VM's
-# 3.6.12 
+# 3.6.12
 - Update inmanta-dev-dependencies package
 # 3.6.11
 - Add setuptools-rust dependency required to build the cryptography package.
