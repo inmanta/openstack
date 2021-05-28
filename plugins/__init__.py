@@ -504,7 +504,7 @@ class HostPort(Port):
     @staticmethod
     def get_wait_for_vm(_, port):
         """ field used to determine is we expect the VM to be present at all """
-        return not(port.vm.purged)
+        return not (port.vm.purged)
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
