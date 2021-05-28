@@ -503,7 +503,7 @@ class HostPort(Port):
 
     @staticmethod
     def get_wait_for_vm(_, port):
-        """ field used to determine is we expect the VM to be present at all """
+        """ field used to determine if we expect the VM to be present at all """
         return not (port.vm.purged)
 
 
