@@ -1509,18 +1509,20 @@ class VirtualMachineHandler(OpenStackHandler):
         server = ctx.get("server")
         server.delete()
 
-        # Wait until the server has been deleted
-        count = 0
-        ctx.info("Server deleted, waiting for neutron to report all ports deleted.")
-        while server is not None and count < 60:
+        def is_server_deletion_finished() -> bool:
             ports = self._neutron.list_ports(device_id=server.id)
             if len(ports["ports"]) > 0:
-                time.sleep(1)
-                count += 1
-            else:
-                server = None
+                return False
+            return self.get_vm(ctx, resource) is None
 
-        if server is not None:
+        # Wait until the server has been deleted
+        count = 0
+        ctx.info("Waiting until server is deleted.")
+        while not is_server_deletion_finished() and count < 60:
+            time.sleep(1)
+            count += 1
+
+        if count >= 60:
             ctx.warning("Delete still in progress, giving up waiting.")
 
         ctx.set_purged()

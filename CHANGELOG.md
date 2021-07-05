@@ -1,3 +1,6 @@
+# 3.7.2
+- Fix wait condition on delete of openstack::VirtualMachine
+
 # 3.7.1
 - Ensure correct detection of deleted HostPorts (#286)
 
