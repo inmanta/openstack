@@ -1,3 +1,6 @@
+# 3.7.3
+- openstack::FloatingIP resource set its ip_address fact on creation
+
 # 3.7.2
 - Fix wait condition on delete of openstack::VirtualMachine
 
