@@ -2691,21 +2691,21 @@ class FloatingIPHandler(OpenStackHandler):
 
         port_id = ctx.get("port_id")
         if network_id is None:
-            raise SkipResource("Unable to finx external network")
+            raise SkipResource("Unable to find external network")
 
         available_fips = self._find_available_fips(project_id, network_id)
-        fip_id = None
+        selected_fip = None
         if len(available_fips) > 0:
             if resource.address is not None:
                 for fip in available_fips:
                     if fip["floating_ip_address"] == resource.address:
-                        fip_id = fip["id"]
+                        selected_fip = fip
             else:
-                fip_id = available_fips[0]["id"]
+                selected_fip = available_fips[0]
 
-        if fip_id:
+        if selected_fip:
             self._neutron.update_floatingip(
-                fip_id,
+                selected_fip["id"],
                 {"floatingip": {"port_id": port_id, "description": resource.name}},
             )
 
@@ -2722,6 +2722,10 @@ class FloatingIPHandler(OpenStackHandler):
             )
 
         ctx.set_created()
+
+        # Setting fact manually
+        for key, value in self.facts(ctx, resource).items():
+            ctx.set_fact(key, value)
 
     def delete_resource(
         self, ctx: handler.HandlerContext, resource: FloatingIP
