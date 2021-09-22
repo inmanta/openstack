@@ -2724,9 +2724,8 @@ class FloatingIPHandler(OpenStackHandler):
         ctx.set_created()
 
         # Setting fact manually
-        ip_address = selected_fip["floating_ip_address"] if selected_fip else resource.address
-        if ip_address:
-            ctx.set_fact("ip_address", ip_address)
+        for key, value in self.facts(ctx, resource).items():
+            ctx.set_fact(key, value)
 
     def delete_resource(
         self, ctx: handler.HandlerContext, resource: FloatingIP
