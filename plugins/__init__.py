@@ -1314,7 +1314,7 @@ class ImageHandler(OpenStackHandler):
                         after this amount of seconds.
         """
         if timeout < 0:
-            raise Exception(f"Timeout cannot be negative: {timeout}")
+            raise ValueError(f"Timeout cannot be negative: {timeout}")
         start_time = time.time()
         image = None
         while time.time() < start_time + timeout:
