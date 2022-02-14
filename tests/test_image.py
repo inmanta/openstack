@@ -1,5 +1,20 @@
-import time
+"""
+    Copyright 2022 Inmanta
 
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+    Contact: code@inmanta.com
+"""
 import inmanta
 import pytest
 
@@ -70,11 +85,10 @@ image=openstack::Image(
     ctx_deploy_1 = project.deploy(created_image)
     assert ctx_deploy_1.status == inmanta.const.ResourceState.skipped
 
-    while True:
-        test_image = get_test_image(glance)[0]
-        if test_image.status == "active":
-            break
-        time.sleep(0.1)
+    handler = project.get_handler(created_image, run_as_root=False)
+    handler.pre(ctx=None, resource=created_image)
+    image_id = get_test_image(glance)[0].id
+    handler._wait_for_image_to_become_active(image_id)
 
     ctx_deploy_2 = project.deploy(created_image)
     assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed
