@@ -1,3 +1,6 @@
+# 3.7.5
+- Fix the bug that makes the `openstack::Image` handler hang when the newly created image doesn't enter the `active` status.
+
 # 3.7.3
 - openstack::FloatingIP resource set its ip_address fact on creation
 

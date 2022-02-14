@@ -1,5 +1,5 @@
 """
-    Copyright 2017 Inmanta
+    Copyright 2022 Inmanta
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ from typing import Dict, Optional, Tuple
 import keystoneauth1.exceptions
 import novaclient.exceptions
 from glanceclient import client as glance_client
+from glanceclient import exc as glance_exceptions
 from inmanta import ast, resources
 from inmanta.agent import handler
 from inmanta.agent.handler import (
@@ -1197,7 +1198,7 @@ class FlavorHandler(OpenStackHandler):
 class ImageHandler(OpenStackHandler):
     def _get_image(self, resource: resources.PurgeableResource):
         if resource.image_id:
-            return self._glance.images.get(resource.image_id)
+            return self._get_image_by_id(resource.image_id)
         else:
             matching_images = [
                 image
@@ -1211,7 +1212,16 @@ class ImageHandler(OpenStackHandler):
             else:
                 return matching_images[0]
 
-    # keep track of whcih keys we had set before
+    def _get_image_by_id(self, image_id: "std::uuid"):
+        """
+        Return the image with the given ID or None if no such image was found.
+        """
+        try:
+            return self._glance.images.get(image_id)
+        except glance_exceptions.HTTPNotFound:
+            return None
+
+    # keep track of which keys we had set before
     # so we can reconstruct the metadata dictionary correctly
     def _get_inmanta_metadata(self, image):
         try:
@@ -1291,13 +1301,30 @@ class ImageHandler(OpenStackHandler):
                 ", but not waiting for it to deploy, because skip_on_deploy is set"
             )
         else:
-            while True:
-                image = self._glance.images.get(image.id)
-                if image.status == "active":
-                    break
-                time.sleep(0.1)
-
+            self._wait_for_image_to_become_active(image.id)
         ctx.set_created()
+
+    def _wait_for_image_to_become_active(
+        self, image_id: "std::uuid", timeout: int = 60
+    ) -> None:
+        """
+        Wait until the image with the given ID enters the `active` status.
+
+        :param timeout: An exception is raised when the image doesn't enter the `active` state
+                        after this amount of seconds.
+        """
+        if timeout < 0:
+            raise Exception(f"Timeout cannot be negative: {timeout}")
+        start_time = time.time()
+        image = self._get_image_by_id(image_id)
+        while (
+            not image or image.status != "active"
+        ) and time.time() < start_time + timeout:
+            time.sleep(0.1)
+            image = self._get_image_by_id(image_id)
+        raise Exception(
+            f"A timeout occurred while waiting for image {image_id} to enter the `active` state (status={image.status})"
+        )
 
     def delete_resource(
         self, ctx: handler.HandlerContext, resource: resources.PurgeableResource
