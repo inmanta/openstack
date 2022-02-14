@@ -86,7 +86,9 @@ image=openstack::Image(
     assert ctx_deploy_1.status == inmanta.const.ResourceState.skipped
 
     handler = project.get_handler(created_image, run_as_root=False)
-    handler._wait_for_image_to_become_active(image_id=created_image.id)
+    handler.pre(ctx=None, resource=created_image)
+    image_id = get_test_image(glance)[0].id
+    handler._wait_for_image_to_become_active(image_id)
 
     ctx_deploy_2 = project.deploy(created_image)
     assert ctx_deploy_2.status == inmanta.const.ResourceState.deployed

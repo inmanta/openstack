@@ -1316,14 +1316,15 @@ class ImageHandler(OpenStackHandler):
         if timeout < 0:
             raise Exception(f"Timeout cannot be negative: {timeout}")
         start_time = time.time()
-        image = self._get_image_by_id(image_id)
-        while (
-            not image or image.status != "active"
-        ) and time.time() < start_time + timeout:
-            time.sleep(0.1)
+        image = None
+        while time.time() < start_time + timeout:
             image = self._get_image_by_id(image_id)
+            if image and image.status == "active":
+                return
+            time.sleep(0.1)
         raise Exception(
-            f"A timeout occurred while waiting for image {image_id} to enter the `active` state (status={image.status})"
+            f"A timeout occurred while waiting for image {image_id} to enter the `active` state "
+            f"(status={image.status if image else None})"
         )
 
     def delete_resource(
