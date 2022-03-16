@@ -1,3 +1,6 @@
+# 3.7.7
+- Use conditional requirement for inmanta-dev-dependencies package
+
 # 3.7.5
 - Fix the bug that makes the `openstack::Image` handler hang when the newly created image doesn't enter the `active` status.
 
