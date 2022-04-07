@@ -6,4 +6,5 @@ python-glanceclient<3.7
 
 pyOpenSSL~=22.0.0
 cryptography~=36.0.2
-setuptools-rust~=1.2.0
+setuptools-rust~=1.1.2; python_version <= '3.6'
+setuptools-rust~=1.2.0; python_version > '3.6'
