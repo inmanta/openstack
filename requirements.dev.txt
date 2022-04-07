@@ -1,2 +1,4 @@
 inmanta-dev-dependencies[module]==1.76.0; python_version <= '3.6'
 inmanta-dev-dependencies[module]==2.12.0; python_version > '3.6'
+setuptool-rust~=1.1.2; python_version <= '3.6'
+setuptool-rust~=1.2.0; python_version > '3.6'
