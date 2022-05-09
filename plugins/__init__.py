@@ -2250,9 +2250,13 @@ class HostPortHandler(OpenStackHandler):
 
         network = self.get_network(None, resource.network)
         if network is None:
-            raise SkipResource(
-                "Network %s for port %s not found." % (resource.network, resource.name)
-            )
+            if resource.purged:
+                # We are not there and should not be there: all good
+                raise ResourcePurged()
+            else:
+                raise SkipResource(
+                    "Network %s for port %s not found." % (resource.network, resource.name)
+                )
         ctx.set("network", network)
 
         vm = self.wait_for_active(ctx, project_id, resource)

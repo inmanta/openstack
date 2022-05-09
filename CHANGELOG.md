@@ -1,3 +1,6 @@
+# 3.7.412
+- Ensure correct remove of HostPorts for Networks that don't exist
+
 # 3.7.11
 - Remove pytest.ini and move its logic to pyproject.toml
 
