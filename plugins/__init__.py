@@ -485,6 +485,7 @@ class HostPort(Port):
         "wait",
         "allowed_address_pairs",
         "wait_for_vm",
+        "is_purged",
     )
 
     @staticmethod
@@ -506,6 +507,16 @@ class HostPort(Port):
     def get_wait_for_vm(_, port):
         """field used to determine if we expect the VM to be present at all"""
         return not (port.vm.purged)
+
+    @staticmethod
+    def get_is_purged(_, port):
+        """
+        field used to determine if we expect the Network to be present at all
+
+        The read method can not see the purged state, but in this case, it is important to 'tune' the waiting
+        """
+
+        return port.purged
 
 
 @resource("openstack::SecurityGroup", agent="provider.name", id_attribute="name")
@@ -2250,7 +2261,7 @@ class HostPortHandler(OpenStackHandler):
 
         network = self.get_network(None, resource.network)
         if network is None:
-            if resource.purged:
+            if resource.is_purged:
                 # We are not there and should not be there: all good
                 raise ResourcePurged()
             else:
