@@ -1,7 +1,7 @@
 python-dateutil~=2.8
 python-keystoneclient~=5.0
 python-novaclient~=18.0
-python-neutronclient~=8.0
+python-neutronclient~=8.1
 python-glanceclient<4.1
 
 pyOpenSSL~=22.0.0
