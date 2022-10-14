@@ -200,7 +200,7 @@ entity AddressPair:
         :attr mac_addr: An optional mac address. When omitted, the mac address of this port is used by neutron.
     """
     ip::cidr address
-    net::mac_addr? mac
+    net::mac_addr? mac = null
 end
 
 implement AddressPair using std::none

@@ -1,3 +1,6 @@
+# 3.8.3
+- Add default null value to mac address
+
 # 3.7.11
 - Remove pytest.ini and move its logic to pyproject.toml
 
