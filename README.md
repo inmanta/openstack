@@ -5,7 +5,7 @@ machines, networks, routers, ...
 
 ## How to use it
 
-This guide explains how to start virtual machines on OpenStack.
+This guide explains how to start virtual machines on OpenStack.More examples can be found in the `examples` folder of this repo.
 
 ### Prerequisites
 
