@@ -3,8 +3,3 @@ python-keystoneclient~=5.0
 python-novaclient~=18.2
 python-neutronclient~=8.2
 python-glanceclient<4.3
-
-pyOpenSSL~=23.0.0
-cryptography~=39.0.0
-setuptools-rust~=1.1.2; python_version <= '3.6'
-setuptools-rust~=1.5.2; python_version > '3.6'

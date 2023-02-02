@@ -1,3 +1,8 @@
+# Changelog
+
+## v3.8.6 - 2023-02-02
+- Dropped outdated requirements
+
 # 3.8.3
 - Add default null value to mac address
 
