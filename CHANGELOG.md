@@ -2,6 +2,7 @@
 
 ## v3.8.10 - ?
 
+- Convert constraints in requirements.txt file
 
 ## v3.8.9 - 2023-04-04
 
