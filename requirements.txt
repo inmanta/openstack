@@ -1,5 +1,5 @@
 python-dateutil>=2.8,<3
 python-keystoneclient>=5.1,<6
 python-novaclient>=18.3,<19
-python-neutronclient>=9.0,<10
+python-neutronclient>=9.0,<11
 python-glanceclient<4.4
