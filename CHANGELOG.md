@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.0.1 - ?
+## v4.0.1 - 2023-12-07
 
 - Remove the broken install_agent functionality.
 - Use either float or int
