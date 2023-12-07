@@ -814,7 +814,8 @@ def test_shared_network(project, openstack):
 
     os = std::OS(name="cirros", version=0.4, family=std::linux)
     key = ssh::Key(name="%(key_name)s", public_key="")
-    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os, ip=std::getfact(self.vm, "ip_address"),
+    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,
+                         ip=std::getfact(self.vm, "ip_address"),
                          image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
                          subnet=s2)
     port = openstack::HostPort(provider=p, vm=vm.vm, subnet=s1, name="%(server_name)s_eth1", address="10.255.255.123",
@@ -857,7 +858,8 @@ def test_shared_network(project, openstack):
 
     os = std::OS(name="cirros", version=0.4, family=std::linux)
     key = ssh::Key(name="%(key_name)s", public_key="")
-    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,  ip=std::getfact(self.vm, "ip_address"),
+    vm = openstack::Host(provider=p, project=project, key_pair=key, name="%(server_name)s", os=os,
+                         ip=std::getfact(self.vm, "ip_address"),
                          image=openstack::find_image(p, os), flavor=openstack::find_flavor(p, 1, 0.5), user_data="",
                          subnet=s2)
 
