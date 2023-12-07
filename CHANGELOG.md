@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.0.1 - ?
+
+
 ## 4.0.0 - ?
 
 - When using openstack::Host the ip attribute will no longer be set automatically to the ip of eth0. To get the
