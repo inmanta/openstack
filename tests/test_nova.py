@@ -71,6 +71,7 @@ vm = openstack::Host(
     key_pair=key,
     name="{name}",
     os=os,
+    ip=std::getfact(vm.vm, "ip_address"),
     image=openstack::find_image(p, os),
     flavor=openstack::find_flavor(p, {", ".join(map(str, flavor_constraints))}),
     user_data="",

@@ -440,7 +440,6 @@ implementation eth0Port for Host:
     port = HostPort(provider=provider, vm=self.vm, subnet=subnet, name="{{name}}_eth0", address=std::getfact(self.vm, "ip_address"),
                     project=project, port_index=1, purged=purged, purge_on_delete=self.purge_on_delete)
     self.vm.eth0_port = port
-    self.ip = port.address
 end
 
 implement Host using eth0Port when subnet is defined
@@ -529,4 +528,3 @@ entity Image extends OpenStackResource:
 end
 
 implement Image using providerRequire
-
