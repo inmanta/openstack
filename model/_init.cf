@@ -260,8 +260,8 @@ entity Subnet extends OpenStackResource:
     string name
     string allocation_start=""
     string allocation_end=""
-    ip::ipv4_address[] dns_servers=[]
-    ip::ipv4_address? gateway_ip=null
+    std::ipv4_address[] dns_servers=[]
+    std::ipv4_address? gateway_ip=null
     bool disable_gateway_ip=false
 end
 
@@ -278,7 +278,7 @@ entity Route:
         A routing rule to add
     """
     std::ipv4_network destination
-    ip::ipv4_address nexthop
+    std::ipv4_address nexthop
 end
 implement Route using std::none
 
