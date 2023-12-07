@@ -15,10 +15,7 @@
 
     Contact: code@inmanta.com
 """
-import ip
-import ip::services
 import net
-import platform
 import ssh
 import std
 
@@ -173,7 +170,7 @@ entity Network extends OpenStackResource:
     bool external=false
     string physical_network=""
     string network_type=""
-    number segmentation_id=0
+    int segmentation_id=0
     bool shared=false
     bool? vlan_transparent=null
 end
@@ -189,7 +186,7 @@ entity Port extends OpenStackResource:
     """
         A port on a network
     """
-    ip::ip address
+    std::ipv4_address address
 end
 
 entity AddressPair:
@@ -199,7 +196,7 @@ entity AddressPair:
         :attr address: The address range that is allowed on this port (network interface)
         :attr mac_addr: An optional mac address. When omitted, the mac address of this port is used by neutron.
     """
-    ip::cidr address
+    std::ipv4_network address
     net::mac_addr? mac = null
 end
 
@@ -237,9 +234,9 @@ entity HostPort extends Port:
     string name
     bool portsecurity=true
     bool dhcp=true
-    number port_index=0
-    number retries=20
-    number wait=5
+    int port_index=0
+    int retries=20
+    int wait=5
 end
 
 implement HostPort using providerRequire
@@ -258,13 +255,13 @@ entity Subnet extends OpenStackResource:
         :attr disable_gateway_ip: When set to true, no gateway IP will be set for the subnet. As such,
                                   the gateway_ip parameter will be ignored.
     """
-    ip::cidr network_address
+    std::ipv4_network network_address
     bool dhcp
     string name
     string allocation_start=""
     string allocation_end=""
-    ip::ip[] dns_servers=[]
-    ip::ip? gateway_ip=null
+    ip::ipv4_address[] dns_servers=[]
+    ip::ipv4_address? gateway_ip=null
     bool disable_gateway_ip=false
 end
 
@@ -280,8 +277,8 @@ entity Route:
     """
         A routing rule to add
     """
-    ip::cidr destination
-    ip::ip nexthop
+    std::ipv4_network destination
+    ip::ipv4_address nexthop
 end
 implement Route using std::none
 
@@ -319,8 +316,8 @@ entity SecurityGroup extends OpenStackResource:
     string description=""
     string name
     bool manage_all=true
-    number retries=10
-    number wait=5
+    int retries=10
+    int wait=5
 end
 
 index SecurityGroup(project, name)
@@ -335,21 +332,24 @@ SecurityGroup.provider [1] -- Provider.security_groups [0:]
 SecurityGroup.project [1] -- Project.security_groups [0:]
 SecurityGroup.virtual_machines [0:] -- VirtualMachine.security_groups [0:]
 
+typedef protocol as string matching self in ["tcp", "udp", "icmp", "sctp", "all"]
+
 entity SecurityRule:
     """
         A filter rule in the a security group
 
         :param ip_protocol The type of ip protocol to allow. Currently this support tcp/udp/icmp/sctp or all
     """
-    ip::protocol ip_protocol
-    ip::port port_min=0
-    ip::port port_max=0
-    ip::port port=0
+    protocol ip_protocol
+    std::port port_min=0
+    std::port port_max=0
+    std::port port=0
     direction direction
 end
 
+
 entity IPrule extends SecurityRule:
-    ip::cidr remote_prefix
+    std::ipv4_network remote_prefix
 end
 
 entity GroupRule extends SecurityRule:
@@ -364,7 +364,7 @@ SecurityRule.group [1] -- SecurityGroup.rules [0:]
 
 entity FloatingIP extends OpenStackResource:
     string name
-    ip::ip address
+    std::ipv4_address address
     bool force_ip=false
 end
 
@@ -386,7 +386,7 @@ FloatingIP.provider [1] -- Provider.floating_ips [0:]
 FloatingIP.external_network [1] -- Network.floating_ips [0:]
 FloatingIP.port [1] -- HostPort.floating_ips [0:]
 
-entity VMAttributes extends platform::UserdataVM:
+entity VMAttributes:
     """
         Entity with vm attributes that can be used for a virtual machine and a host
 
@@ -396,7 +396,6 @@ entity VMAttributes extends platform::UserdataVM:
         :param metadata: A dict of metadata items
         :param personality: A dict of files (personality)
         :param config_drive: Attach a configuration drive to the vm
-        :param install_agent: Create a script and pass it as user_data to install the inmanta agent at boot time.
     """
     string flavor
     string image
@@ -404,7 +403,6 @@ entity VMAttributes extends platform::UserdataVM:
     dict metadata={}
     dict personality={}
     bool config_drive=false
-    bool install_agent=false
 end
 
 entity VirtualMachine extends OpenStackResource, VMAttributes:
@@ -420,7 +418,7 @@ VirtualMachine.key_pair [1] -- ssh::Key
 VirtualMachine.project [1] -- Project
 VirtualMachine.provider [1] -- Provider.virtual_machines [0:]
 
-entity Host extends ip::Host, VMAttributes:
+entity Host extends std::Host, VMAttributes:
     """
         :attr purged: Set whether this Host should exist or not.
         :attr purge_on_delete: Purge this Host when it is deleted from the configuration model.
@@ -453,12 +451,6 @@ end
 
 implement Host using std::hostDefaults, openstackVM
 
-implementation userData for platform::UserdataVM:
-    platform::UserdataBootstrap(vm=self)
-end
-
-implement VirtualMachine using userData when install_agent
-implement Host using userData when install_agent
 
 index Flavor (provider, name)
 Flavor.provider [1] -- Provider.flavors [0:]
@@ -478,13 +470,13 @@ entity Flavor extends OpenStackResource:
         :attr extra_specs: Set extra specs on a flavor. See https://docs.openstack.org/nova/rocky/admin/flavors.html
     """
     string name
-    number ram
-    number vcpus
-    number disk
+    int ram
+    int vcpus
+    int disk
     string? flavor_id = null
-    number ephemeral = 0
-    number swap = 0
-    number rxtx_factor = 1.0
+    int ephemeral = 0
+    int swap = 0
+    float rxtx_factor = 1.0
     bool is_public = true
     dict extra_specs = {}
 end
