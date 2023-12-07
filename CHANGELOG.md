@@ -1,11 +1,6 @@
 # Changelog
 
-## v3.8.14 - ?
-
-
-
-
-## 4.0.0 - 2023/12/07
+## 4.0.0 - ?
 
 - When using openstack::Host the ip attribute will no longer be set automatically to the ip of eth0. To get the
   same behaviour, add the following to the openstack::Host constructor `ip=std::getfact(host.vm, "ip_address")`
