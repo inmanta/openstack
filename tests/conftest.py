@@ -37,7 +37,6 @@ PREFIX = "inmanta_unit_test_"
 
 
 class PackStackVM:
-
     IMAGE_NAME: str = "packstack-snapshot"
     FLAVOR_NAME: str = "c4m16d20"
     PACKSTACK_VM_NAME: str = "packstack"

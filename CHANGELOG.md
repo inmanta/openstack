@@ -5,6 +5,24 @@
 - When using openstack::Host the ip attribute will no longer be set automatically to the ip of eth0. To get the
   same behaviour, add the following to the openstack::Host constructor `ip=std::getfact(host.vm, "ip_address")`
 
+## v3.8.12 - 2023-10-12
+
+## v3.8.11 - 2023-06-30
+
+## v3.8.10 - 2023-05-08
+
+- Convert constraints in requirements.txt file
+
+## v3.8.9 - 2023-04-04
+
+## v3.8.8 - 2023-04-04
+
+## v3.8.7 - 2023-02-02
+
+## v3.8.6 - 2023-02-02
+
+- Dropped outdated requirements
+
 ## 3.8.3
 
 - Add default null value to mac address

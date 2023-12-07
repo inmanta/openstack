@@ -3008,7 +3008,6 @@ class ServiceHandler(OpenStackHandler):
 
 @provider("openstack::EndPoint", name="openstack")
 class EndpointHandler(OpenStackHandler):
-
     types = {"admin": "admin_url", "internal": "internal_url", "public": "public_url"}
 
     def read_resource(self, ctx, resource):
