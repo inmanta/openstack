@@ -2,6 +2,8 @@
 
 ## v4.0.1 - ?
 
+- Remove the broken install_agent functionality.
+- Use either float or int
 
 ## 4.0.0 - 2023-12-07
 
