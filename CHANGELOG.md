@@ -5,7 +5,7 @@
 - Remove the broken install_agent functionality.
 - Use either float or int
 
-## 4.0.0 - 2023/12/07
+## 4.0.0 - 2023-12-07
 
 - When using openstack::Host the ip attribute will no longer be set automatically to the ip of eth0. To get the
   same behaviour, add the following to the openstack::Host constructor `ip=std::getfact(host.vm, "ip_address")`
