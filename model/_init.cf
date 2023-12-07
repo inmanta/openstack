@@ -420,7 +420,7 @@ VirtualMachine.key_pair [1] -- ssh::Key
 VirtualMachine.project [1] -- Project
 VirtualMachine.provider [1] -- Provider.virtual_machines [0:]
 
-entity Host extends std::Host, VMAttributes:
+entity Host extends ip::Host, VMAttributes:
     """
         :attr purged: Set whether this Host should exist or not.
         :attr purge_on_delete: Purge this Host when it is deleted from the configuration model.
