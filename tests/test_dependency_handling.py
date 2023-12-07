@@ -51,6 +51,7 @@ implementation allfor for AllFor:
         image="abcd",
         flavor="1c1m",
         user_data="",
+        ip=std::getfact(vm.vm, "ip_address"),
         subnet=subnet,
         os=std::linux,
         security_groups=sg
