@@ -2,6 +2,7 @@
 
 ## v4.0.2 - ?
 
+- Remove usage of deprecated `net` module
 
 ## v4.0.1 - 2023-12-07
 
