@@ -15,7 +15,6 @@
 
     Contact: code@inmanta.com
 """
-import net
 import ssh
 import std
 
@@ -189,6 +188,13 @@ entity Port extends OpenStackResource:
     std::ipv4_address address
 end
 
+typedef mac_addr as string matching std::validate_type(
+    "pydantic.constr", self, {"regex": "^([0-9a-fA-F]{2})(:[0-9a-fA-F]{2}){5}|$", "strict": true}
+)
+"""
+    A string that only matches valid macaddresses that are colon separated.
+"""
+
 entity AddressPair:
     """
         An address pair that is added to a host port
@@ -197,7 +203,7 @@ entity AddressPair:
         :attr mac_addr: An optional mac address. When omitted, the mac address of this port is used by neutron.
     """
     std::ipv4_network address
-    net::mac_addr? mac = null
+    mac_addr? mac = null
 end
 
 implement AddressPair using std::none
