@@ -15,6 +15,7 @@
 
     Contact: code@inmanta.com
 """
+
 import uuid
 from dataclasses import dataclass
 from typing import Dict, Optional

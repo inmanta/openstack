@@ -15,6 +15,7 @@
 
     Contact: code@inmanta.com
 """
+
 import time
 from typing import Optional, Tuple
 
