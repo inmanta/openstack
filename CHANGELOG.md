@@ -2,6 +2,7 @@
 
 ## v4.0.3 - ?
 
+- Add netifaces dependency
 
 ## v4.0.2 - 2023-12-11
 
