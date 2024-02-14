@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.0.3 - ?
+## v4.0.3 - 2024-02-14
 
 - Add netifaces dependency
 
