@@ -1,0 +1,5 @@
+include inmanta_plugins/openstack/setup.cfg
+include inmanta_plugins/openstack/py.typed
+recursive-include inmanta_plugins/openstack/model *.cf
+graft inmanta_plugins/openstack/files
+graft inmanta_plugins/openstack/templates
